@@ -1,7 +1,7 @@
 # Hogwarts
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/digitizable/reach-plugin-hogwarts/main/icon.png?v=noshadow" alt="Hogwarts" width="128" height="128"/>
+  <img src="https://raw.githubusercontent.com/digitizable/reach-plugin-hogwarts/main/hogwarts.png?v=noshadow" alt="Hogwarts" width="128" height="128"/>
 </p>
 
 <p align="center">
