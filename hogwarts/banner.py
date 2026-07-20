@@ -27,7 +27,7 @@ _CASTLE = r"""
                /|\  [   ]    /||||||\       [   ]     /||||\        [   ]  /|\
               /|||\ [___]===/||||||||\======[___]====/||||||\=======[___]/|||\
              /||||||\  \\__/||||||||||\____//   \\__/||||||||\____//  /||||||\
-            |||||||||\  `===\||||||||||/===´     `===\||||||||/===´  /|||||||||
+            |||||||||\  `===\||||||||||/===`     `===\||||||||/===`  /|||||||||
             ||||||||| \     /||||||||||\             /||||||||\     / ||||||||
             |  ____  | \   |||||||||||||\           /||||||||||\   /  | ____  |
             | |    | |  |  |  GREAT HALL |         |  GREAT HALL |  | |    | |
@@ -40,7 +40,7 @@ _CASTLE = r"""
               _||_/_____________|________|___________|________|_____________\_||_
              /__________________________________________________________________\
             |##################################################################|
-            |##  HOGWARTS  ·  C2 keep for Reach  ·  defend the walls         ##|
+            |##  HOGWARTS  -  C2 keep for Reach  -  defend the walls         ##|
             |##################################################################|
 """.strip(
     "\n"
@@ -51,7 +51,7 @@ _CASTLE_SMALL = r"""
         /___\   KEEP  /___\   HALL  /___\
         [ I ]=========[ I ]=========[ I ]
         |___|  GATE   |___|  GATE   |___|
-          HOGWARTS · C2 · type help
+          HOGWARTS - C2 - type help
 """.strip(
     "\n"
 )
@@ -60,7 +60,7 @@ _CASTLE_SMALL = r"""
 def banner(*, version: str | None = None) -> str:
     """Full high-detail splash for console boot / `banner` command."""
     ver = version if version is not None else __version__
-    return f"{_CASTLE}\n\n  Hogwarts v{ver}  ·  type help · banner | clear"
+    return f"{_CASTLE}\n\n  Hogwarts v{ver}  -  type help - banner | clear"
 
 
 def banner_short() -> str:
