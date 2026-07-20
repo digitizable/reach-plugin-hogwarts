@@ -2,25 +2,31 @@
 
 **C2-esque operator desk** for [Reach](https://github.com/digitizable/reach).
 
-> **Authorized use only** — your lab, contracts, and infrastructure you control.
+Path-aware channel status, reverse listener notes, egress matrix (direct vs SOCKS path), agent export shortcuts, and session playbooks.
 
 ## Install
 
-Reach → **Plugins** → install:
+In Reach → **Plugins** marketplace:
 
 ```text
 digitizable/reach-plugin-handset
 ```
 
-## Features (v0.2.1)
+Requires Reach ≥ 0.5 (plugin host, `reach-plugin.json` schema 1).
+
+## Features
 
 | Panel | What |
 |-------|------|
-| **Channel** | Live path hero, SOCKS / hops / fingerprint facts, quick actions |
-| **Listener** | Accept host/port, transport, cover face, agent id, ops notes + presets |
-| **Egress** | Matrix of TCP probes direct vs path SOCKS; custom targets |
+| **Channel** | Live path hero, SOCKS / hops / fingerprint, quick actions |
+| **Listener** | Accept host/port, transport, cover face, agent id, ops notes |
+| **Egress** | TCP matrix direct vs path SOCKS; custom targets |
 | **Ops kit** | Reverse export folder, playbook JSON, plugin data dir |
-| **Session log** | Local activity trail for the desk session |
+| **Session log** | Local activity trail |
+
+## Logo
+
+`icon.svg` — Lucide `radar` (ISC). See [SOURCES.md](./SOURCES.md).
 
 ## License
 

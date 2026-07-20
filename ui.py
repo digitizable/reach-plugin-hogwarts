@@ -1,4 +1,4 @@
-"""Handset — polished C2-esque operator desk for Reach (authorized lab use)."""
+"""Handset — C2-esque operator desk for Reach."""
 
 from __future__ import annotations
 
@@ -343,7 +343,7 @@ class HandsetPage(Gtk.Box):
         spacer.set_vexpand(True)
         side.append(spacer)
         trust = Gtk.Label(
-            label="Lab use only",
+            label="C2 desk",
             xalign=0.5,
         )
         trust.add_css_class("handset-muted")
@@ -387,8 +387,8 @@ class HandsetPage(Gtk.Box):
 
         banner = Gtk.Label(
             label=(
-                "Authorized lab / contract use only. Handset is a reachback "
-                "and purple-team desk — not an implant framework."
+                "Reverse reachback, path-aware channel status, egress matrix, "
+                "and session playbooks — operator desk for restricted networks."
             ),
             wrap=True,
             xalign=0,
@@ -647,7 +647,7 @@ class HandsetPage(Gtk.Box):
         c1t = Gtk.Label(
             label=(
                 "Open Reach’s reverse export folder for Inverse Snowflake / "
-                "dial-out packages. Drop agents on footholds you control."
+                "dial-out agent packages and peer drops."
             ),
             wrap=True,
             xalign=0,
@@ -1182,7 +1182,6 @@ class HandsetPage(Gtk.Box):
                 "socks": meta.get("last_probe_socks"),
                 "rows": meta.get("last_probe_rows"),
             },
-            "disclaimer": "Authorized lab use only",
         }
         out = self._ctx.data_path(
             f"playbook-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
