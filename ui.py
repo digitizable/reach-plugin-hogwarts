@@ -1,4 +1,4 @@
-"""Handset — C2-esque operator desk for Reach."""
+"""Handset — operator desk for Reach: channel, listener, egress, playbooks."""
 
 from __future__ import annotations
 
@@ -265,7 +265,7 @@ class HandsetPage(Gtk.Box):
         t.add_css_class("handset-title")
         titles.append(t)
         s = Gtk.Label(
-            label="Operator desk · path-aware reachback",
+            label="Channel · listener · egress · playbooks",
             xalign=0,
         )
         s.add_css_class("handset-sub")
@@ -343,7 +343,7 @@ class HandsetPage(Gtk.Box):
         spacer.set_vexpand(True)
         side.append(spacer)
         trust = Gtk.Label(
-            label="C2 desk",
+            label="Operator",
             xalign=0.5,
         )
         trust.add_css_class("handset-muted")

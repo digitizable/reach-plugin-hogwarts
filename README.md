@@ -1,8 +1,6 @@
 # Handset — Reach plugin
 
-**C2-esque operator desk** for [Reach](https://github.com/digitizable/reach).
-
-Path-aware channel status, reverse listener notes, egress matrix (direct vs SOCKS path), agent export shortcuts, and session playbooks.
+**Operator desk** for [Reach](https://github.com/digitizable/reach): path-aware channel status, reverse listener notes, egress matrix (direct vs SOCKS path), agent export shortcuts, and session playbooks.
 
 ## Install
 
