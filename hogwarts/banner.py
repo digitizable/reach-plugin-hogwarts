@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from hogwarts import __version__
 
+# Standard FIGlet-ish block (monospace).
 _WORDMARK = r"""
  _   _                                  _
-| | | | ___   __ _ _ __   ____  _ _ __ | |_ ___
-| |_| |/ _ \ / _` | '_ \ / _  \| '__| __/ __|
-|  _  | (_) | (_| | | | | (_| | |  | |_\__ \
-|_| |_|\___/ \__, |_| |_|\__,_|_|   \__|___/
+| | | | ___   __ ___      ____ _ _ __| |_ ___
+| |_| |/ _ \ / _` \ \ /\ / / _` | '__| __/ __|
+|  _  | (_) | (_| |\ V  V / (_| | |  | |_\__ \
+|_| |_|\___/ \__, | \_/\_/ \__,_|_|   \__|___/
              |___/
 """.strip(
     "\n"
 )
 
-# Great hall / four towers silhouette (desk splash).
 _GLYPH = r"""
               /\
        /\    /  \    /\
@@ -33,20 +33,19 @@ _GLYPH = r"""
 
 
 def banner(*, version: str | None = None) -> str:
-    """Full splash for console boot / `banner` command."""
     ver = version if version is not None else __version__
-    lines = [
-        _WORDMARK,
-        "",
-        _GLYPH,
-        "",
-        f"  Hogwarts v{ver}  ·  type help",
-    ]
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            _WORDMARK,
+            "",
+            _GLYPH,
+            "",
+            f"  Hogwarts v{ver}  ·  type help",
+        ]
+    )
 
 
 def banner_short() -> str:
-    """One-shot compact mark (e.g. after clear)."""
     return (
         "  ┌─────────── HOGWARTS ───────────┐\n"
         "  │  ⚔  keep  ·  C2 desk for Reach │\n"
