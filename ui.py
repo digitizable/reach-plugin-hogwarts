@@ -54,7 +54,6 @@ _HANDSET_CSS = b"""
   background-color: #0f0f0f;
   border-right: 1px solid #222;
   min-width: 200px;
-  max-width: 220px;
   padding: 12px 10px;
 }
 .handset-nav-btn {
@@ -298,6 +297,7 @@ class HandsetPage(Gtk.Box):
         side.add_css_class("handset-sidebar")
         side.set_vexpand(True)
         side.set_hexpand(False)
+        side.set_size_request(210, -1)
 
         side_lab = Gtk.Label(label="Desk", xalign=0)
         side_lab.add_css_class("handset-section")
