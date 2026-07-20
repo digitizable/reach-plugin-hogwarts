@@ -1,40 +1,26 @@
 # Handset — Reach plugin
 
-**C2-esque operator desk** for [Reach](https://github.com/digitizable/reach): path-aware reachback notes, quick egress probes, and agent package shortcuts.
+**C2-esque operator desk** for [Reach](https://github.com/digitizable/reach).
 
-> **Authorized use only** — your lab, contracts, and infrastructure you control.  
-> Not a remote-access crime kit. Mechanisms for purple-team / restricted-network ops.
+> **Authorized use only** — your lab, contracts, and infrastructure you control.
 
 ## Install
 
-In Reach → **Plugins** marketplace:
+Reach → **Plugins** → install:
 
-```
+```text
 digitizable/reach-plugin-handset
 ```
 
-Or:
+## Features (v0.2)
 
-```bash
-# via Reach plugin host
-# owner/repo → Install from GitHub
-```
-
-Requires Reach ≥ 0.5 with plugin host (`reach-plugin.json` schema 1).
-
-## Features
-
-| Surface | Role |
-|---------|------|
-| Path status | Live Spectre hop summary + SOCKS URL |
-| Listener notes | Accept host/port/face notes saved under plugin data |
-| Egress probes | TCP reachability checks (direct + via path SOCKS when up) |
-| Agent package | Open Reach reverse export folder |
-| Playbook JSON | Export a simple session snapshot for ops notes |
-
-## Manifest
-
-See [Reach PLUGIN_SPEC](https://github.com/digitizable/reach/blob/main/docs/PLUGIN_SPEC.md).
+| Panel | What |
+|-------|------|
+| **Channel** | Live path hero, SOCKS / hops / fingerprint facts, quick actions |
+| **Listener** | Accept host/port, transport, cover face, agent id, ops notes + presets |
+| **Egress** | Matrix of TCP probes direct vs path SOCKS; custom targets |
+| **Ops kit** | Reverse export folder, playbook JSON, plugin data dir |
+| **Session log** | Local activity trail for the desk session |
 
 ## License
 

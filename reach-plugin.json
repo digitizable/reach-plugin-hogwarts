@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "com.digitizable.handset",
   "name": "Handset",
-  "version": "0.1.0",
-  "description": "C2-esque operator desk: path-aware reachback notes, egress probes, and agent package shortcuts for authorized lab use.",
+  "version": "0.2.0",
+  "description": "Polished C2-esque operator desk: channel status, listener notes, egress matrix, agent export, playbooks — authorized lab use.",
   "author": "digitizable",
   "homepage": "https://github.com/digitizable/reach-plugin-handset",
   "license": "GPL-3.0-or-later",
@@ -17,7 +17,7 @@
   "nav": {
     "title": "Handset",
     "icon": "network-wireless-symbolic",
-    "tooltip": "Operator desk — path-aware reachback (lab)"
+    "tooltip": "Operator desk — channel, listener, egress"
   },
   "permissions": ["path_status", "socks", "toast", "network", "filesystem"],
   "requires_reach": ">=0.5.0"
