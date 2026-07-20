@@ -15,8 +15,6 @@
 
 **Hogwarts** is the command-and-control plugin for [Reach](https://github.com/digitizable/reach): path-aware channel status, implant roster against your control plane, reverse listener notes, egress probing (direct vs SOCKS path), interactive console, and session playbooks.
 
-Formerly **Handset** / **Malbork** — same role, castle name and mark.
-
 > Unofficial name. Not affiliated with Warner Bros., J.K. Rowling, or the Harry Potter franchise.
 
 ## Install
@@ -37,7 +35,7 @@ rsync -a --delete \
   ./ ~/.local/share/reach/plugins/com__digitizable__hogwarts/
 ```
 
-Restart Reach after changes. Remove old `com.digitizable.malbork` / `handset` installs if both appear.
+Restart Reach after changes.
 
 ## Features
 
@@ -76,4 +74,4 @@ Operate the tasking loop **and** defend the keep. Research: [anguish.sh — Hogw
 
 ## License
 
-GPL-3.0-or-later
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).
