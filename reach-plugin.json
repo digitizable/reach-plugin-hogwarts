@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "com.digitizable.handset",
   "name": "Handset",
-  "version": "0.2.5",
-  "description": "Operator desk for Reach: channel status, reverse listener notes, egress matrix, agent export, and session playbooks.",
+  "version": "0.2.6",
+  "description": "C2 for Reach: channel status, reverse listener, egress matrix, agent export, and session playbooks.",
   "author": "digitizable",
   "homepage": "https://github.com/digitizable/reach-plugin-handset",
   "license": "GPL-3.0-or-later",
@@ -17,7 +17,7 @@
   "nav": {
     "title": "Handset",
     "icon": "network-wireless-symbolic",
-    "tooltip": "Handset \u2014 channel, listener, egress",
+    "tooltip": "Handset \u2014 C2 desk",
     "icon_file": "icon.svg",
     "icon_symbolic": "icon-symbolic.svg"
   },

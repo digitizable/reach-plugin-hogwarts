@@ -1,4 +1,4 @@
-"""Handset — operator desk for Reach: channel, listener, egress, playbooks."""
+"""Handset — C2 desk for Reach: channel, listener, egress, playbooks."""
 
 from __future__ import annotations
 
@@ -265,7 +265,7 @@ class HandsetPage(Gtk.Box):
         t.add_css_class("handset-title")
         titles.append(t)
         s = Gtk.Label(
-            label="Channel · listener · egress · playbooks",
+            label="C2 · channel · listener · egress",
             xalign=0,
         )
         s.add_css_class("handset-sub")
@@ -343,7 +343,7 @@ class HandsetPage(Gtk.Box):
         spacer.set_vexpand(True)
         side.append(spacer)
         trust = Gtk.Label(
-            label="Operator",
+            label="C2",
             xalign=0.5,
         )
         trust.add_css_class("handset-muted")
@@ -387,8 +387,8 @@ class HandsetPage(Gtk.Box):
 
         banner = Gtk.Label(
             label=(
-                "Reverse reachback, path-aware channel status, egress matrix, "
-                "and session playbooks — operator desk for restricted networks."
+                "Command-and-control desk: reverse reachback, path-aware "
+                "channel status, egress matrix, and session playbooks."
             ),
             wrap=True,
             xalign=0,

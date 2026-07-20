@@ -1,6 +1,14 @@
-# Handset — Reach plugin
+# Handset
 
-**Operator desk** for [Reach](https://github.com/digitizable/reach): path-aware channel status, reverse listener notes, egress matrix (direct vs SOCKS path), agent export shortcuts, and session playbooks.
+<p align="center">
+  <img src="icon.svg" alt="Handset" width="128" height="128"/>
+</p>
+
+<p align="center">
+  <strong>C2 for Reach</strong> — channel, reverse listener, egress matrix, agent export, playbooks.
+</p>
+
+Handset is a **command-and-control desk** plugin for [Reach](https://github.com/digitizable/reach): live path-aware channel status, reverse listener notes, egress probing (direct vs SOCKS path), agent package shortcuts, and session playbooks.
 
 ## Install
 
@@ -22,9 +30,14 @@ Requires Reach ≥ 0.5 (plugin host, `reach-plugin.json` schema 1).
 | **Ops kit** | Reverse export folder, playbook JSON, plugin data dir |
 | **Session log** | Local activity trail |
 
-## Logo
+## Icons
 
-`icon.svg` — Lucide `radar` (ISC). See [SOURCES.md](./SOURCES.md).
+| File | Use |
+|------|-----|
+| [`icon.svg`](icon.svg) | Marketplace / README (full color) |
+| [`icon-symbolic.svg`](icon-symbolic.svg) | Reach left rail (themed monochrome) |
+
+See [SOURCES.md](./SOURCES.md).
 
 ## License
 
