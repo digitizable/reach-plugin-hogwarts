@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-VERSION = "0.5.41-lab"
+VERSION = "0.5.42-lab"
 # Keepstream VIDEO codec byte (matches research keepstream-v0)
 _KS_CODEC_JPEG = 1
 _KS_CODEC_H264 = 2
@@ -1796,7 +1796,8 @@ class _FfmpegH264Source:
         fps_i = max(5, min(60, int(round(self.fps))))
         # Map quality 28–95 → CRF 28–18 (lower CRF = higher quality)
         crf = int(max(18, min(28, 33 - (self.quality - 28) * 10 / 67)))
-        gop = max(15, min(60, fps_i))  # keyframe interval ~1s
+        # Shorter GOP (~0.5s) for gaming recovery; still not a big latency hit on NVENC
+        gop = max(8, min(30, max(fps_i // 2, 10)))
 
         def _grab(draw_mouse: bool) -> tuple[list[str], str]:
             if os.name == "nt":
@@ -1919,13 +1920,20 @@ class _FfmpegH264Source:
             "-bsf:v",
             "dump_extra=freq=keyframe",
         ]
+        # Bitrate scales roughly with pixels @ gaming fps (LAN headroom)
+        px = max(1, ow * oh)
+        br_m = max(4, min(16, int(px * fps_i * 0.000012)))  # ~8M @ 960×540×60
         nvenc_simple: list[str] = [
             "-preset",
             "llhp",
             "-rc",
             "cbr",
             "-b:v",
-            "6M",
+            f"{br_m}M",
+            "-maxrate",
+            f"{br_m}M",
+            "-bufsize",
+            f"{max(1, br_m // 2)}M",
             "-delay",
             "0",
             "-zerolatency",
@@ -1935,6 +1943,10 @@ class _FfmpegH264Source:
             "-bsf:v",
             "dump_extra=freq=keyframe",
         ]
+        # Also give ll modes a bit more bits at high fps (less blockiness in games)
+        if fps_i >= 45:
+            nvenc_ll.extend(["-b:v", f"{br_m}M", "-maxrate", f"{int(br_m * 1.3)}M"])
+            nvenc_ll_alt.extend(["-b:v", f"{br_m}M", "-maxrate", f"{int(br_m * 1.3)}M"])
         libx264_opts: list[str] = [
             "-preset",
             "ultrafast",
@@ -2297,6 +2309,11 @@ def _ks_handle_client(conn: Any) -> None:
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception:
         pass
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 128 * 1024)
+    except Exception:
+        pass
     conn.settimeout(30.0)
     f = conn.makefile("rwb", buffering=0)
     stop_reader = {"v": False}
@@ -2454,10 +2471,13 @@ def _ks_handle_client(conn: Any) -> None:
 
         started = False
         if use_h264:
-            # NVENC handles 30+ fps cheaply; still cap auto at 30 for WAN-ish use
-            h264_fps = fps if fps <= 30 else min(fps, 30.0)
-            if codec_req == "h264":
-                h264_fps = fps
+            # NVENC: allow full requested fps up to 60 (gaming). Software x264: cap 30.
+            if _ffmpeg_has_encoder("h264_nvenc"):
+                h264_fps = max(5.0, min(float(fps), 60.0))
+            else:
+                h264_fps = max(5.0, min(float(fps), 30.0))
+            if codec_req == "h264" and _ffmpeg_has_encoder("h264_nvenc"):
+                h264_fps = max(5.0, min(float(fps), 60.0))
             ff_h = _FfmpegH264Source(max_side=side, fps=h264_fps, quality=q)
             if ff_h.start():
                 started = True
@@ -2576,6 +2596,12 @@ def _keepstream_serve_loop() -> None:
     srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
     srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
     try:
+        # Smaller buffers = less queuing lag on the wire (LAN gaming)
+        srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF, 256 * 1024)
+        srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, 256 * 1024)
+    except Exception:
+        pass
+    try:
         srv.bind((bind, port))
         srv.listen(2)
         srv.settimeout(1.0)
@@ -2627,24 +2653,41 @@ def _session_start(payload: dict[str, Any]) -> dict[str, Any]:
     # Stop previous
     _session_stop({})
 
+    profile = str(payload.get("profile") or "balanced").strip().lower()
+    if profile in ("game", "games", "lowlat", "low-latency", "esports"):
+        profile = "gaming"
+    if profile not in ("gaming", "balanced", "quality"):
+        profile = "balanced"
+
+    # Defaults by profile (desk may still override max_side/fps/quality/codec)
+    if profile == "gaming":
+        def_side, def_fps, def_q, def_codec = 960, 60.0, 70, "h264"
+    elif profile == "quality":
+        def_side, def_fps, def_q, def_codec = 1280, 30.0, 78, "h264"
+    else:
+        def_side, def_fps, def_q, def_codec = 1280, 30.0, 72, "auto"
+
     try:
-        max_side = int(payload.get("max_side") or 1280)
+        max_side = int(payload.get("max_side") or def_side)
     except (TypeError, ValueError):
-        max_side = 1280
+        max_side = def_side
     max_side = max(480, min(max_side, 2560))
+    if profile == "gaming":
+        # Hard cap for glass-to-glass — 960 keeps NVENC cheap and snappy
+        max_side = min(max_side, 960)
     try:
-        fps = float(payload.get("fps") or 60)
+        fps = float(payload.get("fps") or def_fps)
     except (TypeError, ValueError):
-        fps = 60.0
+        fps = def_fps
     fps = max(5.0, min(fps, 60.0))
     try:
-        quality = int(payload.get("quality") or 72)
+        quality = int(payload.get("quality") or def_q)
     except (TypeError, ValueError):
-        quality = 72
+        quality = def_q
     quality = max(28, min(quality, 92))
-    codec_req = str(payload.get("codec") or "auto").strip().lower()
+    codec_req = str(payload.get("codec") or def_codec).strip().lower()
     if codec_req not in ("auto", "jpeg", "h264", "jpg", "mjpeg"):
-        codec_req = "auto"
+        codec_req = def_codec if def_codec in ("auto", "jpeg", "h264") else "auto"
     if codec_req in ("jpg", "mjpeg"):
         codec_req = "jpeg"
     try:
@@ -2691,6 +2734,7 @@ def _session_start(payload: dict[str, Any]) -> dict[str, Any]:
             "max_side": max_side,
             "fps": fps,
             "quality": quality,
+            "profile": profile,
             "codec_req": codec_req,
             "codec": planned_codec,
             "capture": "",
@@ -2750,10 +2794,10 @@ def _session_start(payload: dict[str, Any]) -> dict[str, Any]:
         capture_hint = live_cap
     live_codec = str(_KEEPSTREAM.get("codec") or planned_codec)
     note = (
-        f"Keepstream capture={capture_hint} codec={live_codec} "
-        f"(req={codec_req}). "
+        f"Keepstream profile={profile} capture={capture_hint} codec={live_codec} "
+        f"(req={codec_req}) {max_side}px @{fps:.0f}fps. "
         "auto/h264: prefer NVENC then libx264 then MJPEG; "
-        "PIL fallback if ffmpeg missing. Latest-frame drop under load. "
+        "gaming: ≤960px @60 when NVENC. "
         "Live capture method is set when the desk Keepstream client connects."
     )
     if ip_status.get("active"):
@@ -2779,6 +2823,7 @@ def _session_start(payload: dict[str, Any]) -> dict[str, Any]:
         "connect_host": connect_host,
         "codec": live_codec,
         "codec_req": codec_req,
+        "profile": profile,
         "max_side": max_side,
         "fps": fps,
         "quality": quality,

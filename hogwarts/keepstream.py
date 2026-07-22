@@ -203,7 +203,9 @@ class KeepstreamClient:
                 except Exception:
                     pass
                 try:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+                    # Modest buffers — huge RCVBUF queues lag on the desk
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256 * 1024)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 128 * 1024)
                 except Exception:
                     pass
                 return sock

@@ -2268,14 +2268,7 @@ class HogwartsPage(Gtk.Box):
 
         # start Keepstream Session
         self._stop_keepstream_client()
-        try:
-            max_side = int(self._agents.shot_max_side())
-            # 60fps Session: 1280 is a good clarity/throughput balance (ffmpeg)
-            max_side = max(960, min(max_side, 1280))
-        except Exception:
-            max_side = 1280
-
-        # Optional operator plug-in (path to their elevated-input helper)
+        # Optional operator plug-in + Session profile (Gaming / Balanced / Quality)
         start_opts = dict(options or {})
         if not start_opts and self._agents is not None:
             try:
@@ -2284,6 +2277,21 @@ class HogwartsPage(Gtk.Box):
                     start_opts = dict(dv.session_start_options() or {})
             except Exception:
                 start_opts = {}
+
+        try:
+            if start_opts.get("max_side") is not None:
+                max_side = int(start_opts.get("max_side") or 1280)
+            else:
+                max_side = int(self._agents.shot_max_side())
+            profile = str(start_opts.get("profile") or "balanced").lower()
+            if profile == "gaming":
+                max_side = max(640, min(max_side, 960))
+            else:
+                max_side = max(960, min(max_side, 1280))
+        except Exception:
+            max_side = 960 if str(start_opts.get("profile") or "") == "gaming" else 1280
+        # Stash for paint/input tuning while Session is up
+        self._ks_profile = str(start_opts.get("profile") or "balanced").lower()
 
         # Init GStreamer on the GTK main thread before any worker uses it.
         # Gst.init from the Keepstream thread freezes Control/Session UI.
@@ -2317,6 +2325,24 @@ class HogwartsPage(Gtk.Box):
                         codec = "jpeg"
                 if codec not in ("jpeg", "h264", "auto"):
                     codec = "jpeg"
+                profile = str(start_opts.get("profile") or "balanced").strip().lower()
+                if profile in ("game", "gameing", "lowlat", "esports"):
+                    profile = "gaming"
+                try:
+                    fps = float(start_opts.get("fps") or (60 if profile == "gaming" else 30))
+                except (TypeError, ValueError):
+                    fps = 60.0 if profile == "gaming" else 30.0
+                if codec == "jpeg" and profile != "gaming":
+                    fps = max(fps, 60.0)
+                try:
+                    quality = int(start_opts.get("quality") or 72)
+                except (TypeError, ValueError):
+                    quality = 72
+                # Honor explicit codec from Session profile
+                if start_opts.get("codec"):
+                    c2 = str(start_opts.get("codec") or "").strip().lower()
+                    if c2 in ("jpeg", "h264", "auto"):
+                        codec = c2
                 payload: dict = {
                     "mode": "keepstream",
                     "face": face if face != "path" else "loopback",
@@ -2324,12 +2350,14 @@ class HogwartsPage(Gtk.Box):
                     "port": 0,
                     "max_side": max_side,
                     "codec": codec,
-                    # H.264: 30fps is enough; lower glass-to-glass than 60 encode
-                    "fps": 60 if codec == "jpeg" else 30,
-                    "quality": 72,
+                    "profile": profile,
+                    "fps": max(5.0, min(fps, 60.0)),
+                    "quality": max(28, min(quality, 92)),
                 }
                 ip = start_opts.get("input_provider")
-                if isinstance(ip, dict) and ip.get("command"):
+                if isinstance(ip, dict) and (
+                    ip.get("command") or ip.get("pipe") or ip.get("kind")
+                ):
                     payload["input_provider"] = ip
                 created = client.create_task(
                     agent_id,
@@ -2433,8 +2461,10 @@ class HogwartsPage(Gtk.Box):
                     # Schedule at most one paint (~40fps cap); drop intermediates
                     if getattr(self, "_ks_paint_src", None) is not None:
                         return
-                    # 8ms coalesce — low display lag, still leaves room for input
-                    self._ks_paint_src = GLib.timeout_add(8, _ks_paint_tick)
+                    # Gaming: 4ms paint coalesce; balanced: 8ms
+                    prof = str(getattr(self, "_ks_profile", "") or "").lower()
+                    paint_ms = 4 if prof == "gaming" else 8
+                    self._ks_paint_src = GLib.timeout_add(paint_ms, _ks_paint_tick)
 
                 def on_status(msg: str, ok: bool | None) -> None:
                     def ui() -> bool:

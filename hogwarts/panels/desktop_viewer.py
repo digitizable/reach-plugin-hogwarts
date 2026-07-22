@@ -41,6 +41,13 @@ _QUALITY: list[tuple[str, int]] = [
     ("Native 4096", 4096),
 ]
 
+# Session latency profiles (sent as session_start.profile + fps/max_side)
+_SESSION_PROFILES: list[tuple[str, str]] = [
+    ("Gaming", "gaming"),  # ≤960 @ 60fps H.264 — casual play target
+    ("Balanced", "balanced"),  # 1280 @ 30fps
+    ("Quality", "quality"),  # sharper / slower
+]
+
 _ARCHIVE_CAP = 250  # max shots kept per agent folder
 _THUMB = 72
 
@@ -291,12 +298,29 @@ class RemoteDesktopViewer(Gtk.Window):
         self.quality_dd.set_selected(qi)
         self.quality_dd.set_tooltip_text(
             "Capture resolution (long side). Live uses this up to a soft cap "
-            "(HD/FHD) so Control stays responsive."
+            "(HD/FHD) so Control stays responsive. Gaming Session caps at 960."
         )
         self.quality_dd.connect(
             "notify::selected", lambda *_: self._on_quality_changed()
         )
         ribbon.append(self.quality_dd)
+
+        plab = Gtk.Label(label="Session", xalign=0)
+        plab.add_css_class("rdv-field")
+        ribbon.append(plab)
+        self.session_profile_dd = Gtk.DropDown.new_from_strings(
+            [lab for lab, _ in _SESSION_PROFILES]
+        )
+        self.session_profile_dd.set_selected(0)  # Gaming default for playability
+        self.session_profile_dd.set_tooltip_text(
+            "Gaming: ≤960px @ 60fps H.264 (NVENC) — snappiest for light play.\n"
+            "Balanced: 1280 @ 30fps.\n"
+            "Quality: sharper / higher lag."
+        )
+        self.session_profile_dd.connect(
+            "notify::selected", lambda *_: self._on_session_profile_changed()
+        )
+        ribbon.append(self.session_profile_dd)
 
         self.chk_archive_live = Gtk.CheckButton(label="Archive stream")
         self.chk_archive_live.add_css_class("rdv-check")
@@ -1218,9 +1242,15 @@ class RemoteDesktopViewer(Gtk.Window):
         if self._input_flush_src is None:
             ks = self._keepstream
             ks_up = bool(ks is not None and getattr(ks, "connected", False))
-            # Keepstream INPUT is cheap (no plane RTT) — flush ASAP so remote
-            # UI tracks the local cursor tightly.
-            delay_ms = 4 if ks_up else 12
+            # Gaming Session: flush next main-loop tick (0ms). Balanced: 4ms.
+            if ks_up:
+                try:
+                    gaming = self.current_session_profile() == "gaming"
+                except Exception:
+                    gaming = True
+                delay_ms = 0 if gaming else 4
+            else:
+                delay_ms = 12
             self._input_flush_src = GLib.timeout_add(delay_ms, self._flush_input_timer)
 
     def _flush_input_timer(self) -> bool:
@@ -1823,10 +1853,56 @@ class RemoteDesktopViewer(Gtk.Window):
             ok=True,
         )
 
+    def current_session_profile(self) -> str:
+        """gaming | balanced | quality."""
+        try:
+            i = int(self.session_profile_dd.get_selected())
+            if 0 <= i < len(_SESSION_PROFILES):
+                return _SESSION_PROFILES[i][1]
+        except Exception:
+            pass
+        return "gaming"
+
+    def _on_session_profile_changed(self) -> None:
+        prof = self.current_session_profile()
+        if prof == "gaming":
+            # Nudge quality dropdown to Fast 960 if currently higher
+            try:
+                if self.current_max_side() > 960:
+                    self.quality_dd.set_selected(0)  # Fast 960
+            except Exception:
+                pass
+            self._set_status(
+                "Session profile: Gaming (≤960 @ 60fps H.264 / NVENC)",
+                ok=None,
+            )
+        elif prof == "quality":
+            self._set_status("Session profile: Quality (sharper, more lag)", ok=None)
+        else:
+            self._set_status("Session profile: Balanced (1280 @ 30fps)", ok=None)
+
     def session_start_options(self) -> dict[str, Any]:
-        """Extra session_start payload fields (optional input_provider plug-in)."""
+        """Extra session_start payload fields (profile + optional input_provider)."""
         self._save_input_provider_prefs()
         opts: dict[str, Any] = {}
+        prof = self.current_session_profile()
+        opts["profile"] = prof
+        side = self.current_max_side()
+        if prof == "gaming":
+            opts["max_side"] = min(int(side), 960)
+            opts["fps"] = 60
+            opts["quality"] = 70
+            opts["codec"] = "h264"
+        elif prof == "quality":
+            opts["max_side"] = max(int(side), 1280)
+            opts["fps"] = 30
+            opts["quality"] = 78
+            opts["codec"] = "h264"
+        else:
+            opts["max_side"] = min(max(int(side), 960), 1280)
+            opts["fps"] = 30
+            opts["quality"] = 72
+            opts["codec"] = "h264"
         if not hasattr(self, "input_provider_entry"):
             return opts
         cmd = self.input_provider_entry.get_text().strip()
