@@ -2245,6 +2245,12 @@ class HogwartsPage(Gtk.Box):
                     err = str(exc)
 
                 def done() -> bool:
+                    try:
+                        dv = getattr(self._agents, "_desktop_viewer", None)
+                        if dv is not None and hasattr(dv, "clear_keepstream"):
+                            dv.clear_keepstream()
+                    except Exception:
+                        pass
                     if err:
                         self._agents.set_desktop_note(err, ok=False)
                     else:
@@ -2268,6 +2274,22 @@ class HogwartsPage(Gtk.Box):
 
         # start Keepstream Session
         self._stop_keepstream_client()
+        # Kill Live screenshot poll immediately — otherwise stills keep
+        # overwriting / "taking over" the Remote Viewer during connect.
+        try:
+            self._live_desktop_toggle(agent_id, False)
+        except Exception:
+            pass
+        try:
+            self._agents.stop_live_ui()
+        except Exception:
+            pass
+        try:
+            dv = getattr(self._agents, "_desktop_viewer", None)
+            if dv is not None and hasattr(dv, "prepare_keepstream_connect"):
+                dv.prepare_keepstream_connect()
+        except Exception:
+            pass
         # Optional operator plug-in + Session profile (Gaming / Balanced / Quality)
         start_opts = dict(options or {})
         if not start_opts and self._agents is not None:

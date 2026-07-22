@@ -173,6 +173,8 @@ class RemoteDesktopViewer(Gtk.Window):
         self._max_side = max_side
         self._fullscreen = False
         self._focus_mode = False  # stream-only chrome hide (not WM fullscreen)
+        # "keepstream" | "live" | None — while keepstream, reject screenshot/Live paints
+        self._frame_source: str | None = None
         self._current_path: Path | None = None
         # Archive entries: newest first
         self._items: list[dict[str, Any]] = []
@@ -1177,6 +1179,22 @@ class RemoteDesktopViewer(Gtk.Window):
         pixbuf → paint only (no history thrash). H.264 Session uses RGB24 from
         GStreamer (skips filmy JPEG recompress, lower latency).
         """
+        note_u0 = (note or "").upper()
+        looks_keepstream = (
+            note_u0.startswith(("SESSION", "STREAM", "KEEPSTREAM"))
+            or " · #" in (note or "")
+            or (pixel_format or "").lower() == "rgb24"
+        )
+        looks_live = note_u0.startswith("LIVE")
+        # While Keepstream owns the surface, ignore Capture/Live screenshots
+        # (they freeze the window as a single still over the stream).
+        if self._frame_source == "keepstream" and not looks_keepstream:
+            return
+        if looks_keepstream:
+            self._frame_source = "keepstream"
+        elif looks_live and self._frame_source != "keepstream":
+            self._frame_source = "live"
+
         pf = (pixel_format or "jpeg").lower()
         try:
             if pf == "rgb24":
@@ -1436,9 +1454,43 @@ class RemoteDesktopViewer(Gtk.Window):
         except Exception:
             pass
 
+    def prepare_keepstream_connect(self) -> None:
+        """Call when Start Keepstream is pressed — clear stills before stream."""
+        self._frame_source = "keepstream"
+        self._last_sent_frac = None
+        # Drop last Capture/Live still so it cannot "take over" the window
+        self._raw = None
+        self._pixbuf = None
+        self._rgb_bytes_ref = None
+        try:
+            self.picture.set_paintable(None)
+            self.picture.set_pixbuf(None)  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                self.picture.set_paintable(None)
+            except Exception:
+                pass
+        try:
+            self.empty_lab.set_label("Connecting Keepstream…")
+            self.empty_lab.set_visible(True)
+        except Exception:
+            pass
+        # Stop Live immediately (button + callback)
+        if self.btn_live.get_active():
+            self.btn_live.set_active(False)
+        elif self._on_live:
+            try:
+                self._on_live(False)
+            except Exception:
+                pass
+        self.live_badge.set_text("SESSION…")
+        self.live_badge.add_css_class("rdv-badge-live")
+        self._set_status("Connecting Keepstream — waiting for live frames…", ok=None)
+
     def attach_keepstream(self, client: Any) -> None:
         """Attach Keepstream for frames only — never force Control mode."""
         self._keepstream = client
+        self._frame_source = "keepstream"
         self._last_sent_frac = None  # reset move deadzone
         # Pre-seed local_cursor from profile BEFORE HELLO
         try:
@@ -1457,27 +1509,39 @@ class RemoteDesktopViewer(Gtk.Window):
             self._session_local_cursor = True
         self.live_badge.set_text("SESSION")
         self.live_badge.add_css_class("rdv-badge-live")
-        try:
-            self.empty_lab.set_visible(False)
-        except Exception:
-            pass
-        # Force Session (view-only) — deactivates Control via radio group so
-        # connecting never "takes over" with inject/focus steal.
+        # Force Session (view-only) — deactivates Control via radio group
         self._mode = "session"
         if not self._mode_session.get_active():
             self._mode_session.set_active(True)
         else:
             self._set_mode("session")
-        # Stream surface (setup form hidden while watching)
+        # Stream surface (setup form hidden; empty until first Keepstream frame)
         self._main_stack.set_visible_child_name("view")
         self._apply_session_cursor()
-        # Stop Live poll — Keepstream owns frames
+        # Hard-stop Live poll again (race if started during connect)
         if self.btn_live.get_active() and self._on_live:
             self.btn_live.set_active(False)
+        elif self._on_live:
+            try:
+                self._on_live(False)
+            except Exception:
+                pass
+        if self._pixbuf is None:
+            try:
+                self.empty_lab.set_label("Keepstream connected — waiting for video…")
+                self.empty_lab.set_visible(True)
+            except Exception:
+                pass
         self._set_status(
             "Keepstream watching only · press 2 · Control to use mouse/keys",
             ok=True,
         )
+
+    def clear_keepstream(self) -> None:
+        """Session stop — allow Capture/Live frames again."""
+        self._keepstream = None
+        if self._frame_source == "keepstream":
+            self._frame_source = None
 
     def _accepts_remote_input(self) -> bool:
         """Only Control mode injects input (Session is stream-only).
@@ -2398,6 +2462,12 @@ class RemoteDesktopViewer(Gtk.Window):
 
     def _do_session(self, action: str) -> None:
         opts = self.session_start_options() if action == "start" else {}
+        if action == "start":
+            # Clear still screenshot + stop Live *before* async session_start
+            try:
+                self.prepare_keepstream_connect()
+            except Exception:
+                pass
         if self._on_session:
             try:
                 self._on_session(action, opts)
@@ -2422,7 +2492,10 @@ class RemoteDesktopViewer(Gtk.Window):
             if not self._mode_session.get_active():
                 self._mode_session.set_active(True)
         elif action == "stop":
-            self._keepstream = None
+            try:
+                self.clear_keepstream()
+            except Exception:
+                self._keepstream = None
 
     # ── Zoom / display ───────────────────────────────────────────────
 
