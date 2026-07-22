@@ -45,7 +45,7 @@ except ImportError:  # pragma: no cover
     from keepstream.server import session_stop as _ks_session_stop
 
 
-VERSION = "0.5.50-lab"
+VERSION = "0.5.51-lab"
 # Keepstream VIDEO codec byte (matches research keepstream-v0)
 _KS_CODEC_JPEG = 1
 _KS_CODEC_H264 = 2
@@ -2344,7 +2344,7 @@ def _desktop_input(payload: dict[str, Any]) -> dict[str, Any]:
                     send_key(0x10, up=True)
             return
         if typ == "key":
-            key = str(ev.get("key") or "").lower()
+            key = str(ev.get("key") or "").lower().replace("-", "_")
             vk_map = {
                 "return": 0x0D,
                 "enter": 0x0D,
@@ -2360,6 +2360,23 @@ def _desktop_input(payload: dict[str, Any]) -> dict[str, Any]:
                 "delete": 0x2E,
                 "home": 0x24,
                 "end": 0x23,
+                "page_up": 0x21,
+                "page_down": 0x22,
+                "prior": 0x21,
+                "next": 0x22,
+                "insert": 0x2D,
+                "f1": 0x70,
+                "f2": 0x71,
+                "f3": 0x72,
+                "f4": 0x73,
+                "f5": 0x74,
+                "f6": 0x75,
+                "f7": 0x76,
+                "f8": 0x77,
+                "f9": 0x78,
+                "f10": 0x79,
+                "f11": 0x7A,
+                "f12": 0x7B,
             }
             code = vk_map.get(key)
             if code is None and len(key) == 1:

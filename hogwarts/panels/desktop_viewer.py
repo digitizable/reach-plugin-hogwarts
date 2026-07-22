@@ -200,7 +200,8 @@ class RemoteDesktopViewer(Gtk.Window):
         self.btn_show_ui = Gtk.Button(label="Show UI")
         self.btn_show_ui.add_css_class("rdv-focus-toggle")
         self.btn_show_ui.set_tooltip_text(
-            "Show title, toolbar, archive, and status again (F9 or Esc)"
+            "Show title, toolbar, archive, and status again "
+            "(button, or Ctrl+F9 / Ctrl+Esc — plain Esc stays on remote)"
         )
         self.btn_show_ui.connect("clicked", lambda *_: self._set_focus_mode(False))
         self._focus_bar.append(self.btn_show_ui)
@@ -397,8 +398,9 @@ class RemoteDesktopViewer(Gtk.Window):
         except Exception:
             pass
         self.btn_focus.set_tooltip_text(
-            "Focus mode (F9): hide UI chrome · stream only in this window · "
-            "top bar toggles UI back"
+            "Focus mode: hide UI chrome · stream only (not OS fullscreen). "
+            "While Session is live, typing goes to Windows — use Show UI or "
+            "Ctrl+F9 to restore chrome (plain F9/Esc do not)."
         )
         self.btn_focus.connect("clicked", lambda *_: self._set_focus_mode(True))
         ribbon.append(self.btn_focus)
@@ -606,6 +608,11 @@ class RemoteDesktopViewer(Gtk.Window):
             _g: Gtk.GestureClick, n_press: int, x: float, y: float
         ) -> None:
             if self._accepts_remote_input():
+                # Claim keyboard focus so typing goes remote, not archive/chrome
+                try:
+                    self.picture.grab_focus()
+                except Exception:
+                    pass
                 return  # drag gesture owns left button when controlling/session
             if n_press == 1 and self._pixbuf is not None:
                 self._set_zoom(1.0 if self._zoom_mode is None else None)
@@ -945,6 +952,77 @@ class RemoteDesktopViewer(Gtk.Window):
         # Keys
         key = Gtk.EventControllerKey()
 
+        def _remote_keys_active() -> bool:
+            try:
+                return bool(self._accepts_remote_input())
+            except Exception:
+                return self._mode in ("control", "session")
+
+        def _forward_key_to_remote(keyval: int, state: Gdk.ModifierType) -> bool:
+            """Send a keystroke to the host; never trigger local zoom/focus/archive.
+
+            Printable chars use type=text (proper shift via agent VkKeyScan).
+            Named keys (arrows, F-keys, Escape, …) use type=key.
+            """
+            # Ctrl+Alt desk chords stay local (handled by caller)
+            name = (Gdk.keyval_name(keyval) or "").lower()
+            # Prefer unicode for typing (handles Shift+number punctuation, etc.)
+            try:
+                uc = Gdk.keyval_to_unicode(keyval)
+            except Exception:
+                uc = 0
+            if uc and 32 <= uc < 0x10FFFF:
+                ch = chr(uc)
+                # Skip pure control chars; Space is 32 and is fine
+                if ch.isprintable() or ch == " ":
+                    self._send_input([{"type": "type", "text": ch}])
+                    return True
+            # Named / special keys
+            aliases = {
+                "return": "return",
+                "kp_enter": "return",
+                "iso_enter": "return",
+                "escape": "escape",
+                "backspace": "backspace",
+                "tab": "tab",
+                "space": "space",
+                "up": "up",
+                "down": "down",
+                "left": "left",
+                "right": "right",
+                "delete": "delete",
+                "kp_delete": "delete",
+                "home": "home",
+                "end": "end",
+                "page_up": "page_up",
+                "page_down": "page_down",
+                "insert": "insert",
+            }
+            key_name = aliases.get(name, name)
+            if key_name.startswith("kp_") and len(key_name) == 4 and key_name[3].isdigit():
+                key_name = key_name[3]  # KP_0..9
+            if key_name.startswith("f") and key_name[1:].isdigit():
+                pass  # f1..f12
+            if not key_name or key_name in (
+                "shift_l",
+                "shift_r",
+                "control_l",
+                "control_r",
+                "alt_l",
+                "alt_r",
+                "super_l",
+                "super_r",
+                "meta_l",
+                "meta_r",
+                "caps_lock",
+                "num_lock",
+                "scroll_lock",
+            ):
+                # Modifiers alone: still consume so they don't hit local UI
+                return True
+            self._send_input([{"type": "key", "key": key_name}])
+            return True
+
         def on_key(
             _c: Gtk.EventControllerKey,
             keyval: int,
@@ -952,7 +1030,52 @@ class RemoteDesktopViewer(Gtk.Window):
             state: Gdk.ModifierType,
         ) -> bool:
             ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
-            # Esc: exit focus chrome → then unfullscreen
+            shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+            alt = bool(state & Gdk.ModifierType.ALT_MASK)
+            remote = _remote_keys_active()
+
+            # Desk-only chords (never sent remote) — keep theater/zoom stable
+            # while typing. Plain Esc/F9/F/1 must NOT mutate local layout.
+            if ctrl and not alt:
+                if keyval == Gdk.KEY_F9:
+                    self._set_focus_mode(not self._focus_mode)
+                    return True
+                if keyval == Gdk.KEY_F10:
+                    self._toggle_maximize()
+                    return True
+                if keyval == Gdk.KEY_F11:
+                    self._toggle_fullscreen()
+                    return True
+                if keyval == Gdk.KEY_Escape and self._focus_mode:
+                    self._set_focus_mode(False)
+                    return True
+                if keyval in (Gdk.KEY_c, Gdk.KEY_C) and not remote:
+                    self._copy_frame()
+                    return True
+                if keyval in (Gdk.KEY_s, Gdk.KEY_S) and not remote:
+                    self._save_as()
+                    return True
+                if keyval in (Gdk.KEY_o, Gdk.KEY_O) and not remote:
+                    self._open_folder()
+                    return True
+                # Ctrl+Plus/Minus zoom only when not remote-typing
+                if not remote and keyval in (
+                    Gdk.KEY_plus,
+                    Gdk.KEY_equal,
+                    Gdk.KEY_KP_Add,
+                ):
+                    self._nudge_zoom(1)
+                    return True
+                if not remote and keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+                    self._nudge_zoom(-1)
+                    return True
+
+            # Session / Control: ALL keys go to host (incl. Esc, F, 1, Space).
+            # This stops focus mode exit + fit/1:1 zoom "screen spreads out".
+            if remote:
+                return _forward_key_to_remote(keyval, state)
+
+            # Local-only shortcuts (View mode / no Keepstream)
             if keyval == Gdk.KEY_Escape:
                 if self._focus_mode:
                     self._set_focus_mode(False)
@@ -968,31 +1091,6 @@ class RemoteDesktopViewer(Gtk.Window):
                 return True
             if keyval == Gdk.KEY_F11:
                 self._toggle_fullscreen()
-                return True
-            # When remote input is active (Control or Keepstream Session), do not
-            # steal Left/Right/Space/R/F/1 for archive/zoom — send them remote.
-            remote_input = False
-            try:
-                remote_input = bool(self._accepts_remote_input())
-            except Exception:
-                remote_input = self._mode == "control"
-            if remote_input and not ctrl:
-                name = Gdk.keyval_name(keyval) or ""
-                if len(name) == 1 or name.lower() in (
-                    "return",
-                    "escape",
-                    "backspace",
-                    "tab",
-                    "space",
-                    "up",
-                    "down",
-                    "left",
-                    "right",
-                    "delete",
-                ):
-                    self._send_input([{"type": "key", "key": name}])
-                    return True
-                # Unmapped keys still consumed so they do not hit local shortcuts
                 return True
             if keyval in (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add):
                 self._nudge_zoom(1)
@@ -1018,22 +1116,24 @@ class RemoteDesktopViewer(Gtk.Window):
             if keyval == Gdk.KEY_space and not ctrl:
                 self._do_shot()
                 return True
-            if keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete) and self._mode != "control":
+            if keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
                 self._delete_selected()
-                return True
-            if ctrl and keyval in (Gdk.KEY_c, Gdk.KEY_C):
-                self._copy_frame()
-                return True
-            if ctrl and keyval in (Gdk.KEY_s, Gdk.KEY_S):
-                self._save_as()
-                return True
-            if ctrl and keyval in (Gdk.KEY_o, Gdk.KEY_O):
-                self._open_folder()
                 return True
             return False
 
         key.connect("key-pressed", on_key)
+        # Propagate phase so we get keys even when a child has focus
+        try:
+            key.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        except Exception:
+            pass
         self.add_controller(key)
+        # Let the stream surface take focus when clicked (typing stays on host)
+        try:
+            self.picture.set_focusable(True)
+            self.picture.set_can_focus(True)
+        except Exception:
+            pass
         self.connect("close-request", self._on_close)
 
         # Load existing archive from disk
@@ -1299,6 +1399,10 @@ class RemoteDesktopViewer(Gtk.Window):
     def attach_keepstream(self, client: Any) -> None:
         """Attach a live KeepstreamClient; frames already applied via page callbacks."""
         self._keepstream = client
+        try:
+            self.picture.grab_focus()
+        except Exception:
+            pass
         # Pre-seed local_cursor from profile BEFORE HELLO (attach often runs first)
         try:
             if self.current_session_profile() in ("gaming", "gaming-lan"):
@@ -1498,16 +1602,13 @@ class RemoteDesktopViewer(Gtk.Window):
         ks = self._keepstream
         ks_up = bool(ks is not None and getattr(ks, "connected", False))
         et = str(event.get("type") or "")
-        if ks_up and et in ("move", "rmove", "wheel"):
+        # Immediate path for hover + typing (no GLib delay)
+        if ks_up and et in ("move", "rmove", "wheel", "key", "type"):
             try:
-                # Coalesce: if only moves pending, replace with latest
                 if et == "move" and not self._input_queue:
                     ks.send_input([event])
                     return
-                if et == "rmove":
-                    ks.send_input([event])
-                    return
-                if et == "wheel":
+                if et in ("rmove", "wheel", "key", "type"):
                     ks.send_input([event])
                     return
             except Exception:
@@ -2439,9 +2540,15 @@ class RemoteDesktopViewer(Gtk.Window):
             except Exception:
                 pass
             self._set_status(
-                "Focus mode — stream only · Show UI (top) or F9 / Esc to restore",
+                "Focus mode — stream only · Show UI or Ctrl+F9 "
+                "(typing stays on remote)",
                 ok=True,
             )
+            # Focus the stream so keyboard goes to host, not archive widgets
+            try:
+                self.picture.grab_focus()
+            except Exception:
+                pass
             try:
                 self.add_css_class("rdv-focus")
             except Exception:
