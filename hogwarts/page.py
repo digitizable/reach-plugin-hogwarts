@@ -2369,6 +2369,11 @@ class HogwartsPage(Gtk.Box):
                     payload["local_cursor"] = bool(start_opts.get("local_cursor"))
                 elif profile in ("gaming", "gaming-lan"):
                     payload["local_cursor"] = True
+                # Host draw_mouse fallback (can coexist with desk overlay)
+                if "draw_mouse" in start_opts:
+                    payload["draw_mouse"] = bool(start_opts.get("draw_mouse"))
+                elif profile in ("gaming", "gaming-lan"):
+                    payload["draw_mouse"] = True  # belt-and-suspenders until overlay proven
                 ip = start_opts.get("input_provider")
                 if isinstance(ip, dict) and (
                     ip.get("command") or ip.get("pipe") or ip.get("kind")

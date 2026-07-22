@@ -139,6 +139,7 @@ class RemoteDesktopViewer(Gtk.Window):
         self._keepstream: Any = None  # KeepstreamClient when Session connected
         self._last_motion_xy: tuple[float, float] | None = None
         self._rel_mouse = False  # Parsec-class relative mouse (gaming Session)
+        self._overlay_cursor_on = False  # drawn pointer (system cursor is unreliable)
 
         safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in agent_id)[:48]
         if archive_dir:
@@ -540,6 +541,7 @@ class RemoteDesktopViewer(Gtk.Window):
         def on_drag_begin(_g: Gtk.GestureDrag, x: float, y: float) -> None:
             if not self._accepts_remote_input() or self._pixbuf is None:
                 return
+            self._move_overlay_cursor(x, y)
             frac = self._widget_xy_to_frac(self.picture, x, y)
             if frac is None:
                 self._drag_active = False
@@ -554,6 +556,7 @@ class RemoteDesktopViewer(Gtk.Window):
             ok, ox, oy = _g.get_start_point()
             if not ok:
                 return
+            self._move_overlay_cursor(ox + x, oy + y)
             frac = self._widget_xy_to_frac(self.picture, ox + x, oy + y)
             if frac is None:
                 return
@@ -577,6 +580,7 @@ class RemoteDesktopViewer(Gtk.Window):
             self._drag_active = False
             if not ok:
                 return
+            self._move_overlay_cursor(ox + x, oy + y)
             frac = self._widget_xy_to_frac(self.picture, ox + x, oy + y)
             if frac is None:
                 frac = self._drag_start
@@ -651,6 +655,9 @@ class RemoteDesktopViewer(Gtk.Window):
                 return
             self._last_move_flush = now
 
+            # Always drive the drawn overlay pointer (system cursor is unreliable)
+            self._move_overlay_cursor(x, y)
+
             if self._rel_mouse:
                 # Relative mouse in host pixels (Parsec-class aim)
                 prev = self._last_motion_xy
@@ -677,9 +684,15 @@ class RemoteDesktopViewer(Gtk.Window):
 
         def on_leave(_c: Gtk.EventControllerMotion) -> None:
             self._last_motion_xy = None
+            # Keep last overlay position (don't vanish mid-game)
+
+        def on_enter(_c: Gtk.EventControllerMotion, x: float, y: float) -> None:
+            self._last_motion_xy = (x, y)
+            self._move_overlay_cursor(x, y)
 
         motion.connect("motion", on_motion)
         motion.connect("leave", on_leave)
+        motion.connect("enter", on_enter)
         self.picture.add_controller(motion)
 
         scroll_c = Gtk.EventControllerScroll()
@@ -704,11 +717,29 @@ class RemoteDesktopViewer(Gtk.Window):
         scroll_c.connect("scroll", on_scroll)
         self.picture.add_controller(scroll_c)
 
+        # Parsec-class: draw our own pointer over the stream. Relying on
+        # set_cursor_from_name("default") failed on this desk (still invisible
+        # while host draw_mouse=0). Overlay is always painted in-widget.
+        self._stream_overlay = Gtk.Overlay()
+        self._stream_overlay.set_hexpand(True)
+        self._stream_overlay.set_vexpand(True)
+        self._stream_overlay.set_child(self.picture)
+        self._cursor_da = Gtk.DrawingArea()
+        self._cursor_da.set_content_width(22)
+        self._cursor_da.set_content_height(26)
+        self._cursor_da.set_halign(Gtk.Align.START)
+        self._cursor_da.set_valign(Gtk.Align.START)
+        self._cursor_da.set_can_target(False)  # clicks pass through to picture
+        self._cursor_da.set_draw_func(self._on_draw_overlay_cursor, None)
+        self._cursor_da.set_visible(False)
+        self._cursor_da.add_css_class("rdv-overlay-cursor")
+        self._stream_overlay.add_overlay(self._cursor_da)
+
         frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         frame.add_css_class("rdv-frame")
         frame.set_hexpand(True)
         frame.set_vexpand(True)
-        frame.append(self.picture)
+        frame.append(self._stream_overlay)
 
         self._scroll = Gtk.ScrolledWindow()
         self._scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -1133,7 +1164,7 @@ class RemoteDesktopViewer(Gtk.Window):
         self.session_lab.set_text("\n".join(lines) if lines else "Session updated.")
 
     def _wants_local_cursor(self) -> bool:
-        """True when host omits pointer in capture — desk MUST show OS cursor."""
+        """True when host omits pointer in capture — desk MUST show a pointer."""
         ks = self._keepstream
         if ks is not None and bool(getattr(ks, "local_cursor", False)):
             return True
@@ -1142,85 +1173,121 @@ class RemoteDesktopViewer(Gtk.Window):
                 return True
         except Exception:
             pass
-        # session_start result note / flag stashed on attach
         if bool(getattr(self, "_session_local_cursor", False)):
             return True
         return False
 
-    def _set_widget_cursor(self, widget: Gtk.Widget | None, *, local: bool) -> None:
-        """Force a visible system cursor (or hide). Apply on several widgets."""
+    def _on_draw_overlay_cursor(
+        self,
+        _da: Gtk.DrawingArea,
+        cr: Any,
+        _w: int,
+        _h: int,
+        _data: Any,
+    ) -> None:
+        """Classic arrow pointer (black outline, white fill)."""
+        # Tip at (1,1) so hot-spot is top-left of the DrawingArea
+        cr.set_line_width(1.2)
+        cr.move_to(1, 1)
+        cr.line_to(1, 18)
+        cr.line_to(5, 14)
+        cr.line_to(8, 21)
+        cr.line_to(10.5, 20)
+        cr.line_to(7.5, 13)
+        cr.line_to(13, 13)
+        cr.close_path()
+        cr.set_source_rgb(1.0, 1.0, 1.0)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.05, 0.05, 0.05)
+        cr.stroke()
+
+    def _move_overlay_cursor(self, x: float, y: float) -> None:
+        """Position the drawn pointer at widget coords (hotspot ≈ tip)."""
+        if not self._overlay_cursor_on:
+            return
+        da = getattr(self, "_cursor_da", None)
+        if da is None:
+            return
+        try:
+            # Hotspot at tip (1,1); clamp so it stays on the overlay
+            mx = max(0, int(x) - 1)
+            my = max(0, int(y) - 1)
+            da.set_margin_start(mx)
+            da.set_margin_top(my)
+            if not da.get_visible():
+                da.set_visible(True)
+        except Exception:
+            pass
+
+    def _set_widget_cursor_none(self, widget: Gtk.Widget | None) -> None:
+        """Hide the system cursor so only the drawn overlay shows."""
         if widget is None:
             return
         try:
-            if local:
-                # None = inherit system default (most reliable on GTK4)
-                widget.set_cursor(None)
-                display = widget.get_display()
-                cur = None
-                if display is not None:
-                    try:
-                        # GTK 4.0+: Cursor.new_from_name(name) or (display, name)
-                        cur = Gdk.Cursor.new_from_name("default")
-                    except TypeError:
-                        try:
-                            cur = Gdk.Cursor.new_from_name(display, "default")
-                        except Exception:
-                            cur = None
-                    except Exception:
-                        cur = None
-                if cur is not None:
-                    widget.set_cursor(cur)
-                else:
-                    try:
-                        widget.set_cursor_from_name("default")
-                    except Exception:
-                        pass
-            else:
-                try:
-                    widget.set_cursor_from_name("none")
-                except Exception:
-                    try:
-                        display = widget.get_display()
-                        if display is not None:
-                            nc = Gdk.Cursor.new_from_name("none")
-                            if nc is not None:
-                                widget.set_cursor(nc)
-                    except Exception:
-                        pass
+            widget.set_cursor_from_name("none")
         except Exception:
-            pass
+            try:
+                nc = Gdk.Cursor.new_from_name("none")
+                if nc is not None:
+                    widget.set_cursor(nc)
+            except Exception:
+                try:
+                    widget.set_cursor(None)
+                except Exception:
+                    pass
 
     def _apply_session_cursor(self) -> None:
-        """Parsec-class: gaming* uses local OS pointer; balanced hides it (host in-frame).
+        """Parsec-class pointer: draw overlay arrow; hide system cursor.
 
-        Host gaming capture uses draw_mouse=0 — if we fail to show a local
-        cursor the operator sees **nothing**. Always re-apply on HELLO/up.
+        set_cursor("default") is unreliable on this desk (stayed invisible while
+        host draw_mouse=0). The DrawingArea overlay is always painted.
         """
         local = self._wants_local_cursor()
-        # CSS belt-and-suspenders (GTK theme cursor: none is common elsewhere)
-        try:
-            if local:
-                self.picture.remove_css_class("rdv-cursor-none")
-                self.picture.add_css_class("rdv-cursor-local")
-                if getattr(self, "_scroll", None) is not None:
-                    self._scroll.remove_css_class("rdv-cursor-none")
-                    self._scroll.add_css_class("rdv-cursor-local")
-            else:
-                self.picture.remove_css_class("rdv-cursor-local")
-                self.picture.add_css_class("rdv-cursor-none")
-                if getattr(self, "_scroll", None) is not None:
-                    self._scroll.remove_css_class("rdv-cursor-local")
-                    self._scroll.add_css_class("rdv-cursor-none")
-        except Exception:
-            pass
-        # Picture, scroll, frame, and window — scrolled parents can steal cursor
+        self._overlay_cursor_on = bool(local)
+        da = getattr(self, "_cursor_da", None)
+        if da is not None:
+            try:
+                da.set_visible(bool(local))
+            except Exception:
+                pass
+        # Hide OS cursor whenever we own the pointer (overlay) OR host paints it
+        # (balanced) — either way system arrow over the picture is wrong/dupe.
+        hide_system = True
+        if not local and self._mode == "view":
+            hide_system = False
         parent = None
         try:
             parent = self.picture.get_parent()
         except Exception:
             parent = None
-        for w in (self.picture, getattr(self, "_scroll", None), parent, self):
-            self._set_widget_cursor(w, local=local)
+        widgets = [
+            self.picture,
+            getattr(self, "_stream_overlay", None),
+            getattr(self, "_scroll", None),
+            parent,
+            self,
+        ]
+        if hide_system:
+            for w in widgets:
+                self._set_widget_cursor_none(w)
+        else:
+            for w in widgets:
+                if w is None:
+                    continue
+                try:
+                    w.set_cursor(None)
+                except Exception:
+                    pass
+        # Seed overlay near center if we have no motion yet
+        if local and self._last_motion_xy is None:
+            try:
+                ww = max(40, self.picture.get_width() or 400)
+                wh = max(40, self.picture.get_height() or 300)
+                self._move_overlay_cursor(ww * 0.5, wh * 0.5)
+            except Exception:
+                self._move_overlay_cursor(40, 40)
+        elif local and self._last_motion_xy is not None:
+            self._move_overlay_cursor(*self._last_motion_xy)
 
     def on_keepstream_up(self) -> None:
         """Called when HELLO_OK lands (local_cursor flag now reliable)."""
@@ -1228,7 +1295,7 @@ class RemoteDesktopViewer(Gtk.Window):
         self._apply_session_cursor()
         if self._wants_local_cursor():
             self._set_status(
-                "Keepstream up — local cursor visible · relative mouse on gaming",
+                "Keepstream up — drawn cursor overlay · relative mouse on gaming",
                 ok=True,
             )
 
@@ -2140,12 +2207,15 @@ class RemoteDesktopViewer(Gtk.Window):
             opts["quality"] = 72
             opts["codec"] = "jpeg"  # MJPEG — snappiest on LAN
             opts["local_cursor"] = True
+            # Host pointer in stream as fallback if desk overlay fails
+            opts["draw_mouse"] = True
         elif prof == "gaming":
             opts["max_side"] = min(int(side), 1280)
             opts["fps"] = 60
             opts["quality"] = 72
             opts["codec"] = "h264"
             opts["local_cursor"] = True
+            opts["draw_mouse"] = True
         elif prof == "quality":
             opts["max_side"] = max(int(side), 1280)
             opts["fps"] = 30
