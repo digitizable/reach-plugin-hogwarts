@@ -142,6 +142,7 @@ class RemoteDesktopViewer(Gtk.Window):
         self._drag_sent_down = False
         self._drag_start: tuple[float, float] | None = None
         self._last_move_flush = 0.0
+        self._last_sent_frac: tuple[float, float] | None = None
         self._live_interval_sec = 1.0  # float seconds; Control drops to 0.5
         self._keepstream: Any = None  # KeepstreamClient when Session connected
         self._last_motion_xy: tuple[float, float] | None = None
@@ -712,13 +713,11 @@ class RemoteDesktopViewer(Gtk.Window):
         rclick.connect("pressed", on_right)
         self.picture.add_controller(rclick)
 
-        # Hover move: absolute fx/fy at high rate so Windows tooltips/hover work.
-        # (Relative-only gaming mouse breaks shell hover; rmove remains available
-        # if we re-enable via flag later.)
+        # Hover move: absolute fx/fy — rate-limited + deadzone to stop host
+        # cursor jitter (double SetCursorPos + sub-pixel flip-flop).
         motion = Gtk.EventControllerMotion()
 
         def on_motion(_c: Gtk.EventControllerMotion, x: float, y: float) -> None:
-            # Cursor tracking is independent of input accept / throttle.
             frac = None
             if self._pixbuf is not None:
                 frac = self._widget_xy_to_frac(self.picture, x, y)
@@ -737,22 +736,28 @@ class RemoteDesktopViewer(Gtk.Window):
             now = _time.monotonic()
             ks = self._keepstream
             ks_up = bool(ks is not None and getattr(ks, "connected", False))
-            # Session: ~120 Hz absolute moves (hover + aim). Control: 25 Hz.
-            min_dt = 0.008 if ks_up else 0.04
+            # ~60 Hz is enough for hover; 120 Hz flooded the host and jittered
+            min_dt = 0.016 if ks_up else 0.04
             if now - self._last_move_flush < min_dt:
                 return
-            self._last_move_flush = now
 
             if frac is None:
                 frac = self._widget_xy_to_frac(self.picture, x, y)
             if frac is None:
                 return
             fx, fy = frac
-            # Absolute move — Windows UI hover/tooltips need real cursor position
+            # Deadzone: ignore sub-pixel noise (~½ px at 1920 / 1 px at 960)
+            prev = self._last_sent_frac
+            if prev is not None:
+                if abs(fx - prev[0]) < 0.0007 and abs(fy - prev[1]) < 0.0007:
+                    return
+            self._last_move_flush = now
+            self._last_sent_frac = (fx, fy)
             self._queue_input({"type": "move", "fx": fx, "fy": fy})
 
         def on_leave(_c: Gtk.EventControllerMotion) -> None:
             self._last_motion_xy = None
+            # Keep last_sent_frac — re-enter shouldn't snap host cursor
 
         def on_enter(_c: Gtk.EventControllerMotion, x: float, y: float) -> None:
             self._last_motion_xy = (x, y)

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "com.digitizable.hogwarts",
   "name": "Hogwarts",
-  "version": "0.5.86",
+  "version": "0.5.87",
   "description": "Reach plugin for command-and-control: agents, control plane, listeners, egress checks, and operator playbooks.",
   "author": "digitizable",
   "homepage": "https://github.com/digitizable/hogwarts",
