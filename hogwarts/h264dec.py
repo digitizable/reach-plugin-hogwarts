@@ -3,12 +3,43 @@
 Prefers GStreamer (appsrc → h264parse → avdec_h264 → jpegenc → appsink).
 Falls back to None if GStreamer/plugins are unavailable (caller keeps waiting
 for JPEG frames or the agent may fall back to MJPEG).
+
+Important: call :func:`ensure_gst_init` once from the **GTK main thread** before
+Session starts. Initializing GStreamer from a worker while GTK owns the default
+GLib main context freezes the Control/Session UI.
 """
 
 from __future__ import annotations
 
 import threading
 from typing import Any
+
+_gst_init_lock = threading.Lock()
+_gst_ready = False
+_gst_ok = False
+
+
+def ensure_gst_init() -> bool:
+    """Initialize GStreamer once. Prefer calling from the GTK main thread."""
+    global _gst_ready, _gst_ok
+    if _gst_ready:
+        return _gst_ok
+    with _gst_init_lock:
+        if _gst_ready:
+            return _gst_ok
+        try:
+            import gi
+
+            gi.require_version("Gst", "1.0")
+            from gi.repository import Gst
+
+            if not getattr(Gst, "is_initialized", lambda: False)():
+                Gst.init(None)
+            _gst_ok = True
+        except Exception:
+            _gst_ok = False
+        _gst_ready = True
+        return _gst_ok
 
 
 class H264ToJpeg:
@@ -23,38 +54,31 @@ class H264ToJpeg:
 
     @property
     def available(self) -> bool:
-        try:
-            import gi
-
-            gi.require_version("Gst", "1.0")
-            from gi.repository import Gst  # noqa: F401
-
-            return True
-        except Exception:
-            return False
+        return ensure_gst_init()
 
     def start(self) -> bool:
         if self._ok and self._pipe is not None:
             return True
+        if not ensure_gst_init():
+            return False
         try:
             import gi
 
             gi.require_version("Gst", "1.0")
             from gi.repository import Gst
 
-            if not getattr(Gst, "is_initialized", lambda: False)():
-                Gst.init(None)
             self._Gst = Gst
             # byte-stream Annex-B; config-interval so parse can recover SPS/PPS
+            # Short appsink queue + drop keeps decode off the UI path under load
             desc = (
                 "appsrc name=src is-live=true do-timestamp=true format=time "
                 "block=false max-bytes=0 "
                 "caps=video/x-h264,stream-format=byte-stream,alignment=au ! "
                 "h264parse config-interval=-1 ! "
                 "avdec_h264 ! videoconvert ! "
-                "jpegenc quality=80 ! "
+                "jpegenc quality=75 ! "
                 "appsink name=sink emit-signals=false sync=false "
-                "max-buffers=2 drop=true enable-last-sample=false"
+                "max-buffers=1 drop=true enable-last-sample=false"
             )
             pipe = Gst.parse_launch(desc)
             src = pipe.get_by_name("src")
@@ -90,7 +114,8 @@ class H264ToJpeg:
             except Exception:
                 pass
 
-    def decode(self, annex_b_au: bytes, *, timeout_s: float = 0.6) -> bytes | None:
+    def decode(self, annex_b_au: bytes, *, timeout_s: float = 0.12) -> bytes | None:
+        """Decode one AU → JPEG. Short timeout so the stream thread never stalls long."""
         if not annex_b_au:
             return None
         with self._lock:
@@ -100,14 +125,8 @@ class H264ToJpeg:
             try:
                 buf = Gst.Buffer.new_allocate(None, len(annex_b_au), None)
                 buf.fill(0, annex_b_au)
-                # Treat as complete access unit
-                try:
-                    buf.set_flags(Gst.BufferFlags.HEADER if self._pushed == 0 else 0)
-                except Exception:
-                    pass
                 ret = self._src.emit("push-buffer", buf)
                 if ret != Gst.FlowReturn.OK:
-                    # try restart once
                     self.stop()
                     if not self.start():
                         return None
@@ -117,18 +136,14 @@ class H264ToJpeg:
                     if ret != Gst.FlowReturn.OK:
                         return None
                 self._pushed += 1
-                # Parameter-set-only AUs won't produce a sample — short wait is fine.
-                # Picture AUs may need a bit longer on first IDR after join.
-                timeout_ns = int(max(0.05, timeout_s) * Gst.SECOND)
+                # First few AUs (SPS/PPS or first IDR) may need a bit longer
+                to = timeout_s
+                if self._pushed <= 4:
+                    to = max(to, 0.35)
+                timeout_ns = int(max(0.02, to) * Gst.SECOND)
                 sample = self._sink.emit("try-pull-sample", timeout_ns)
                 if sample is None:
-                    # Drain a bit longer once the pipeline is warm
-                    if self._pushed <= 3:
-                        sample = self._sink.emit(
-                            "try-pull-sample", int(0.4 * Gst.SECOND)
-                        )
-                    if sample is None:
-                        return None
+                    return None
                 out_buf = sample.get_buffer()
                 if out_buf is None:
                     return None

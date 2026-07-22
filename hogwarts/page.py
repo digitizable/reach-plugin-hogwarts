@@ -2184,6 +2184,13 @@ class HogwartsPage(Gtk.Box):
         self._agents.set_desktop_note("Starting SOCKS on agent…")
 
     def _stop_keepstream_client(self) -> None:
+        src = getattr(self, "_ks_paint_src", None)
+        if src is not None:
+            try:
+                GLib.source_remove(src)
+            except Exception:
+                pass
+            self._ks_paint_src = None
         ks = getattr(self, "_keepstream", None)
         if ks is not None:
             try:
@@ -2278,6 +2285,15 @@ class HogwartsPage(Gtk.Box):
             except Exception:
                 start_opts = {}
 
+        # Init GStreamer on the GTK main thread before any worker uses it.
+        # Gst.init from the Keepstream thread freezes Control/Session UI.
+        try:
+            from hogwarts.h264dec import ensure_gst_init
+
+            ensure_gst_init()
+        except Exception:
+            pass
+
         def work_start() -> None:
             err: str | None = None
             res: dict | None = None
@@ -2367,47 +2383,52 @@ class HogwartsPage(Gtk.Box):
 
                 from hogwarts.keepstream import KeepstreamClient
 
-                # Coalesce UI paints: only one idle callback; always show newest
-                self._ks_paint_pending = False
+                # Coalesce paints on a timer (not idle_add): idle floods at 30fps
+                # starve GTK input and freeze Control. Always show newest frame.
+                self._ks_paint_src = None
+
+                def _ks_paint_tick() -> bool:
+                    self._ks_paint_src = None
+                    if not self._agents.desktop_viewer_open():
+                        return False
+                    ks_ref = getattr(self, "_keepstream", None)
+                    item = None
+                    if ks_ref is not None:
+                        try:
+                            item = ks_ref.pop_latest_frame()
+                        except Exception:
+                            item = None
+                    if item is None:
+                        return False
+                    data, meta = item
+                    rtt = meta.get("rtt_ms")
+                    rtt_s = (
+                        f" · rtt {rtt:.0f}ms"
+                        if isinstance(rtt, (int, float))
+                        else ""
+                    )
+                    drop = meta.get("dropped") or 0
+                    drop_s = f" · drop {drop}" if drop else ""
+                    cname = meta.get("codec_name") or (
+                        "h264" if meta.get("codec") == 2 else "jpeg"
+                    )
+                    note = (
+                        f"SESSION {meta.get('width')}×{meta.get('height')} · "
+                        f"{cname} · #{meta.get('frame_id')} · "
+                        f"{meta.get('bytes')} B"
+                        f"{rtt_s}{drop_s}"
+                    )
+                    self._agents.set_desktop_frame(
+                        data, note=note, ok=True, record_history=False
+                    )
+                    return False
 
                 def on_frame(_data: bytes, _meta: dict) -> None:
-                    if getattr(self, "_ks_paint_pending", False):
+                    # Schedule at most one paint (~40fps cap); drop intermediates
+                    if getattr(self, "_ks_paint_src", None) is not None:
                         return
-                    self._ks_paint_pending = True
-
-                    def ui() -> bool:
-                        self._ks_paint_pending = False
-                        if not self._agents.desktop_viewer_open():
-                            return False
-                        ks_ref = getattr(self, "_keepstream", None)
-                        item = None
-                        if ks_ref is not None:
-                            try:
-                                item = ks_ref.pop_latest_frame()
-                            except Exception:
-                                item = None
-                        if item is None:
-                            return False
-                        data, meta = item
-                        rtt = meta.get("rtt_ms")
-                        rtt_s = f" · rtt {rtt:.0f}ms" if isinstance(rtt, (int, float)) else ""
-                        drop = meta.get("dropped") or 0
-                        drop_s = f" · drop {drop}" if drop else ""
-                        cname = meta.get("codec_name") or (
-                            "h264" if meta.get("codec") == 2 else "jpeg"
-                        )
-                        note = (
-                            f"SESSION {meta.get('width')}×{meta.get('height')} · "
-                            f"{cname} · #{meta.get('frame_id')} · "
-                            f"{meta.get('bytes')} B"
-                            f"{rtt_s}{drop_s}"
-                        )
-                        self._agents.set_desktop_frame(
-                            data, note=note, ok=True, record_history=False
-                        )
-                        return False
-
-                    GLib.idle_add(ui)
+                    # 24ms ≈ 42fps max UI paint — leaves main loop for input
+                    self._ks_paint_src = GLib.timeout_add(24, _ks_paint_tick)
 
                 def on_status(msg: str, ok: bool | None) -> None:
                     def ui() -> bool:
@@ -2418,6 +2439,13 @@ class HogwartsPage(Gtk.Box):
 
                 def on_closed() -> None:
                     def ui() -> bool:
+                        src = getattr(self, "_ks_paint_src", None)
+                        if src is not None:
+                            try:
+                                GLib.source_remove(src)
+                            except Exception:
+                                pass
+                            self._ks_paint_src = None
                         self._agents.set_desktop_note(
                             "Keepstream disconnected", ok=None
                         )

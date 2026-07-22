@@ -891,7 +891,12 @@ class RemoteDesktopViewer(Gtk.Window):
         record_history: bool = True,
         path: Path | None = None,
     ) -> None:
-        """Decode and display a frame; archive new captures to disk."""
+        """Decode and display a frame; archive new captures to disk.
+
+        Keepstream / Live stream frames take a **fast path**: JPEG→pixbuf→paint
+        only. Skipping history/title/status thrash every frame is what keeps
+        Control + Session responsive under 20–30 fps H.264.
+        """
         try:
             loader = GdkPixbuf.PixbufLoader()
             loader.write(data)
@@ -909,9 +914,37 @@ class RemoteDesktopViewer(Gtk.Window):
         self._note = note or f"{w}×{h} · {_fmt_bytes(len(data))}"
         # Stream frames must NEVER flood ~/Pictures unless "Archive live" is on
         note_u = self._note.upper()
-        is_stream = note_u.startswith(
-            ("LIVE", "SESSION", "STREAM", "KEEPSTREAM")
-        ) or " · #" in self._note  # Keepstream frame_id notes
+        is_stream = (
+            (not record_history)
+            or note_u.startswith(("LIVE", "SESSION", "STREAM", "KEEPSTREAM"))
+            or " · #" in self._note  # Keepstream frame_id notes
+        )
+
+        if is_stream and not self._archive_live:
+            # ── Fast path (Session / Live) ──────────────────────────
+            try:
+                self.empty_lab.set_visible(False)
+            except Exception:
+                pass
+            self._capturing = False
+            self._current_path = None
+            self._render()
+            # Throttle chrome updates so paint doesn't starve input
+            import time as _time
+
+            now = _time.monotonic()
+            last = float(getattr(self, "_stream_chrome_ts", 0.0) or 0.0)
+            if now - last >= 0.35:
+                self._stream_chrome_ts = now
+                self._set_status(self._note, ok=ok)
+                self._update_meta()
+                # Title less often — WM updates are relatively expensive
+                if now - float(getattr(self, "_stream_title_ts", 0.0) or 0.0) >= 1.5:
+                    self._stream_title_ts = now
+                    self.set_title(
+                        f"Remote Viewer - {self._agent_label} · {w}×{h}"
+                    )
+            return
 
         if record_history and not self._loading_archive:
             should_archive = (not is_stream) or self._archive_live
