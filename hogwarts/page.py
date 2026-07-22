@@ -1882,10 +1882,12 @@ class HogwartsPage(Gtk.Box):
                     self._log_msg(f"screenshot fail: {err}")
                 else:
                     assert blob is not None
-                    self._agents.set_desktop_frame(blob, note=note, ok=True)
+                    # Display only — no sidebar/history unless viewer Save to disk
+                    self._agents.set_desktop_frame(
+                        blob, note=note, ok=True, record_history=False
+                    )
                     self._agents.set_task_note(f"Screenshot {note}", ok=True)
                     self._log_msg(f"screenshot {note}")
-                    # Archive is owned by Remote Viewer (ShareX-style history)
                     self._refresh_tasks(agent_id)
                 return False
 

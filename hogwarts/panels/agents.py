@@ -1809,8 +1809,9 @@ class AgentsPanel(Gtk.Box):
             agent_label=label,
             agent_id=agent.id,
             archive_dir=archive,
-            initial_bytes=self._frame_bytes,
-            initial_note=self._frame_note,
+            # Never seed a cached still — open blank until Stream/Capture
+            initial_bytes=None,
+            initial_note="",
             live_on=False,
             max_side=self._shot_max_side,
             on_screenshot=on_shot,
@@ -1877,14 +1878,9 @@ class AgentsPanel(Gtk.Box):
             self.desktop_status.add_css_class("hogwarts-ok")
         elif ok is False:
             self.desktop_status.add_css_class("hogwarts-fail")
-        # Default: do not mark for disk archive (viewer also requires Save to disk)
+        # Default: never archive into sidebar/disk (viewer Save to disk is opt-in)
         if record_history is None:
-            nu = msg.upper()
-            is_stream = nu.startswith(
-                ("LIVE", "SESSION", "STREAM", "KEEPSTREAM")
-            )
-            # Capture stills: display only unless viewer Save-to-disk is on
-            record_history = not is_stream
+            record_history = False
         # While Keepstream owns the surface, never push Capture/Live stills
         nu = msg.upper()
         looks_ks = (

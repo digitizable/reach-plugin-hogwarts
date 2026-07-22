@@ -547,6 +547,15 @@ class RemoteDesktopViewer(Gtk.Window):
         self.archive_count = Gtk.Label(label="0", xalign=1)
         self.archive_count.add_css_class("rdv-archive-count")
         side_head.append(self.archive_count)
+        # Explicit only — never auto-fill from disk on open
+        self.btn_arch_reload = _icon_btn(
+            "view-refresh-symbolic",
+            "Load saved files from folder (only if you used Save to disk)",
+        )
+        self.btn_arch_reload.connect(
+            "clicked", lambda *_: self._load_archive_from_disk()
+        )
+        side_head.append(self.btn_arch_reload)
         side.append(side_head)
 
         self.archive_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -1218,14 +1227,15 @@ class RemoteDesktopViewer(Gtk.Window):
             pass
         self.connect("close-request", self._on_close)
 
-        # Load existing archive from disk
-        self._load_archive_from_disk()
-        if initial_bytes:
-            self.apply_frame(initial_bytes, note=initial_note, ok=True)
-        else:
-            self._update_hist_ui()
-            if self._items:
-                self._select_index(0)
+        # Start blank: no auto-load of ~/Pictures, no stale initial still,
+        # no auto-Capture. User clicks Stream or Capture deliberately.
+        self._update_hist_ui()
+        try:
+            self.empty_lab.set_visible(True)
+        except Exception:
+            pass
+        # Ignore initial_bytes — showing a cached frame felt like an auto-shot
+        _ = initial_bytes, initial_note
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -1235,17 +1245,16 @@ class RemoteDesktopViewer(Gtk.Window):
         *,
         note: str = "",
         ok: bool | None = True,
-        record_history: bool = True,
+        record_history: bool = False,
         path: Path | None = None,
         pixel_format: str | None = None,
         width: int | None = None,
         height: int | None = None,
     ) -> None:
-        """Decode and display a frame; archive new captures to disk.
+        """Decode and display a frame. Never auto-fills the archive sidebar.
 
-        Keepstream / Live stream frames take a **fast path**: RGB24 or JPEG →
-        pixbuf → paint only (no history thrash). H.264 Session uses RGB24 from
-        GStreamer (skips filmy JPEG recompress, lower latency).
+        Sidebar / disk only when **Save to disk** is checked (and
+        record_history is true). Stream/Live always paint-only by default.
         """
         note_u0 = (note or "").upper()
         looks_keepstream = (
@@ -1627,14 +1636,39 @@ class RemoteDesktopViewer(Gtk.Window):
             pass
 
     def clear_keepstream(self) -> None:
-        """Stream stop — allow Capture/Live frames again."""
+        """Stream stop — blank surface; do not Capture or fill archive."""
         self._keepstream = None
         if self._frame_source == "keepstream":
             self._frame_source = None
+        # Do not leave a frozen still that looks like a new screenshot,
+        # and never queue Capture/Live here.
+        self._raw = None
+        self._pixbuf = None
+        self._current_path = None
+        try:
+            self.picture.set_paintable(None)
+        except Exception:
+            pass
+        try:
+            self.picture.set_pixbuf(None)
+        except Exception:
+            pass
+        try:
+            self.empty_lab.set_label(
+                "Stream stopped — click Stream to reconnect\nor Capture for a still"
+            )
+            self.empty_lab.set_visible(True)
+        except Exception:
+            pass
         try:
             if not self.btn_live.get_active():
                 self.live_badge.set_text("")
                 self.live_badge.remove_css_class("rdv-badge-live")
+        except Exception:
+            pass
+        self._set_status("Stream stopped", ok=None)
+        try:
+            self._update_meta()
         except Exception:
             pass
 
@@ -1700,14 +1734,16 @@ class RemoteDesktopViewer(Gtk.Window):
                 except Exception:
                     pass
             else:
+                # Never auto-start Live stills — that filled the archive/sidebar
                 self.mode_hint.set_text(
-                    "Control on · no stream — using Live stills (or click Stream)"
+                    "Control on · click Stream for video (or Live stills manually)"
                 )
-                self._set_live_interval(0.3)
-                if not self.btn_live.get_active() and self._on_live:
-                    self.btn_live.set_active(True)
                 try:
                     self.picture.set_cursor_from_name("default")
+                except Exception:
+                    pass
+                try:
+                    self.picture.grab_focus()
                 except Exception:
                     pass
         else:
@@ -1717,10 +1753,9 @@ class RemoteDesktopViewer(Gtk.Window):
                 )
             else:
                 self.mode_hint.set_text(
-                    "Watch · Capture / Live stills · or Stream for live video"
+                    "Watch · click Stream for live video, or Capture for a still"
                 )
             if not ks_up:
-                self._set_live_interval(0.8)
                 try:
                     self.picture.set_cursor_from_name("default")
                 except Exception:

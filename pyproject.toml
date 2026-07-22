@@ -1,6 +1,6 @@
 [project]
 name = "hogwarts"
-version = "0.5.94"
+version = "0.5.95"
 description = "Reach plugin for command-and-control (Hogwarts)"
 requires-python = ">=3.10"
 dependencies = [
