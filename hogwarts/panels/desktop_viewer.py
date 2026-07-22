@@ -45,7 +45,7 @@ _QUALITY: list[tuple[str, int]] = [
 _SESSION_PROFILES: list[tuple[str, str]] = [
     ("Gaming LAN", "gaming-lan"),  # ≤1280 @ 60 MJPEG + local cursor + UDP
     ("Gaming", "gaming"),  # ≤1280 @ 60 H.264/NVENC + local cursor + UDP
-    ("Balanced", "balanced"),  # 1280 @ 30 H.264 (host cursor in-frame)
+    ("Balanced", "balanced"),  # 1280 @ 45 H.264 — smooth UI animations
     ("Quality", "quality"),  # sharper / slower
 ]
 
@@ -626,13 +626,14 @@ class RemoteDesktopViewer(Gtk.Window):
         rclick.connect("pressed", on_right)
         self.picture.add_controller(rclick)
 
-        # Hover move while Control/Session — gaming: relative + ~250 Hz
+        # Hover move: absolute fx/fy at high rate so Windows tooltips/hover work.
+        # (Relative-only gaming mouse breaks shell hover; rmove remains available
+        # if we re-enable via flag later.)
         motion = Gtk.EventControllerMotion()
 
         def on_motion(_c: Gtk.EventControllerMotion, x: float, y: float) -> None:
-            # Cursor tracking is independent of input accept / throttle — otherwise
-            # the pointer never moves (and looked "invisible" when system cursor
-            # was also none).
+            # Cursor tracking is independent of input accept / throttle.
+            frac = None
             if self._pixbuf is not None:
                 frac = self._widget_xy_to_frac(self.picture, x, y)
                 if frac is not None:
@@ -652,44 +653,22 @@ class RemoteDesktopViewer(Gtk.Window):
             now = _time.monotonic()
             ks = self._keepstream
             ks_up = bool(ks is not None and getattr(ks, "connected", False))
-            gaming = False
+            # Session: ~120–160 Hz absolute moves (hover + smooth aim).
+            # Control/Live poll: 25 Hz is enough.
             if ks_up:
-                try:
-                    gaming = self.current_session_profile() in (
-                        "gaming",
-                        "gaming-lan",
-                    )
-                except Exception:
-                    gaming = bool(getattr(ks, "local_cursor", False))
-            self._rel_mouse = bool(gaming and ks_up)
-            # Gaming: 4ms (~250 Hz). Balanced: 16ms. Control poll: 40ms.
-            min_dt = 0.004 if self._rel_mouse else (0.016 if ks_up else 0.04)
+                min_dt = 0.006
+            else:
+                min_dt = 0.04
             if now - self._last_move_flush < min_dt:
                 return
             self._last_move_flush = now
 
-            if self._rel_mouse:
-                # Relative mouse in host pixels (Parsec-class aim)
-                prev = self._last_motion_xy
-                self._last_motion_xy = (x, y)
-                if prev is None:
-                    return
-                ddx = x - prev[0]
-                ddy = y - prev[1]
-                if abs(ddx) < 0.25 and abs(ddy) < 0.25:
-                    return
-                dx_h, dy_h = self._widget_delta_to_host(ddx, ddy)
-                if dx_h == 0 and dy_h == 0:
-                    return
-                self._queue_input({"type": "rmove", "dx": dx_h, "dy": dy_h})
-                return
-
-            frac = self._widget_xy_to_frac(self.picture, x, y)
             if frac is None:
-                self._last_motion_xy = (x, y)
+                frac = self._widget_xy_to_frac(self.picture, x, y)
+            if frac is None:
                 return
-            self._last_motion_xy = (x, y)
             fx, fy = frac
+            # Absolute move — Windows UI hover/tooltips need real cursor position
             self._queue_input({"type": "move", "fx": fx, "fy": fy})
 
         def on_leave(_c: Gtk.EventControllerMotion) -> None:
@@ -698,6 +677,9 @@ class RemoteDesktopViewer(Gtk.Window):
 
         def on_enter(_c: Gtk.EventControllerMotion, x: float, y: float) -> None:
             self._last_motion_xy = (x, y)
+            frac = self._widget_xy_to_frac(self.picture, x, y)
+            if frac is not None:
+                self._cursor_frac = frac
             self._move_overlay_cursor(x, y)
 
         motion.connect("motion", on_motion)
@@ -1506,17 +1488,23 @@ class RemoteDesktopViewer(Gtk.Window):
         """Batch input events; flush on a short timer (lower task spam, snappier feel)."""
         if not event:
             return
-        # Gaming relative moves: send immediately (no GLib coalesce)
+        # Keepstream Session: send hover/move immediately (Windows UI needs
+        # continuous absolute positions — GLib coalesce kills tooltips).
         ks = self._keepstream
         ks_up = bool(ks is not None and getattr(ks, "connected", False))
-        if (
-            ks_up
-            and str(event.get("type") or "") == "rmove"
-            and self._rel_mouse
-        ):
+        et = str(event.get("type") or "")
+        if ks_up and et in ("move", "rmove", "wheel"):
             try:
-                ks.send_input([event])
-                return
+                # Coalesce: if only moves pending, replace with latest
+                if et == "move" and not self._input_queue:
+                    ks.send_input([event])
+                    return
+                if et == "rmove":
+                    ks.send_input([event])
+                    return
+                if et == "wheel":
+                    ks.send_input([event])
+                    return
             except Exception:
                 pass
         self._input_queue.append(event)
@@ -1524,18 +1512,8 @@ class RemoteDesktopViewer(Gtk.Window):
         if len(self._input_queue) > 40:
             self._input_queue = self._input_queue[-40:]
         if self._input_flush_src is None:
-            # Gaming Session: flush next main-loop tick (0ms). Balanced: 4ms.
-            if ks_up:
-                try:
-                    gaming = self.current_session_profile() in (
-                        "gaming",
-                        "gaming-lan",
-                    )
-                except Exception:
-                    gaming = True
-                delay_ms = 0 if gaming else 4
-            else:
-                delay_ms = 12
+            # Session: next idle tick. Control/Live: 8ms.
+            delay_ms = 0 if ks_up else 8
             self._input_flush_src = GLib.timeout_add(delay_ms, self._flush_input_timer)
 
     def _flush_input_timer(self) -> bool:
@@ -2214,28 +2192,27 @@ class RemoteDesktopViewer(Gtk.Window):
         if prof == "gaming-lan":
             opts["max_side"] = min(int(side), 1280)
             opts["fps"] = 60
-            opts["quality"] = 72
+            opts["quality"] = 78  # sharper UI chrome on LAN
             opts["codec"] = "jpeg"  # MJPEG — snappiest on LAN
             opts["local_cursor"] = True
-            # Desk paints composite arrow — host cursor in stream looks like a
-            # "stuck real cursor" after click (absolute inject leaves it there).
+            # Desk paints composite arrow — host cursor off (no stuck dual pointer)
             opts["draw_mouse"] = False
         elif prof == "gaming":
             opts["max_side"] = min(int(side), 1280)
             opts["fps"] = 60
-            opts["quality"] = 72
+            opts["quality"] = 75
             opts["codec"] = "h264"
             opts["local_cursor"] = True
             opts["draw_mouse"] = False
         elif prof == "quality":
             opts["max_side"] = max(int(side), 1280)
-            opts["fps"] = 30
-            opts["quality"] = 78
+            opts["fps"] = 45  # smoother than 30 for window animations
+            opts["quality"] = 80
             opts["codec"] = "h264"
         else:
             opts["max_side"] = min(max(int(side), 960), 1280)
-            opts["fps"] = 30
-            opts["quality"] = 72
+            opts["fps"] = 45  # UI animations / hover feedback
+            opts["quality"] = 74
             opts["codec"] = "h264"
         if not hasattr(self, "input_provider_entry"):
             return opts
@@ -2376,7 +2353,7 @@ class RemoteDesktopViewer(Gtk.Window):
             self._set_zoom(smaller[-1] if smaller else scales[0])
 
     def _schedule_cursor_repaint(self) -> None:
-        """Coalesce cursor-only repaints (~60 Hz) when stream is quiet."""
+        """Coalesce cursor-only repaints (~60 Hz) between stream frames."""
         if not self._wants_local_cursor():
             return
         if self._cursor_repaint_src is not None:
@@ -2390,19 +2367,83 @@ class RemoteDesktopViewer(Gtk.Window):
                 pass
             return False
 
-        self._cursor_repaint_src = GLib.timeout_add(16, _tick)
+        # 12ms ≈ 80 Hz max extra paints — cheap with composite()
+        self._cursor_repaint_src = GLib.timeout_add(12, _tick)
+
+    def _ensure_cursor_stamp(self) -> GdkPixbuf.Pixbuf | None:
+        """Cached 16×20 RGBA arrow (built once via raw pixels)."""
+        stamp = getattr(self, "_cursor_stamp", None)
+        if stamp is not None:
+            return stamp
+        try:
+            w, h = 16, 20
+            rowstride = w * 4
+            buf = bytearray(h * rowstride)  # transparent zero
+            poly = [
+                (1, 1),
+                (1, 17),
+                (5, 13),
+                (8, 19),
+                (10, 18),
+                (7, 12),
+                (13, 12),
+            ]
+
+            def _inside(px: int, py: int) -> bool:
+                inside = False
+                n = len(poly)
+                for i in range(n):
+                    x1, y1 = poly[i]
+                    x2, y2 = poly[(i + 1) % n]
+                    if ((y1 > py) != (y2 > py)) and (
+                        px < (x2 - x1) * (py - y1) / max(1e-9, (y2 - y1)) + x1
+                    ):
+                        inside = not inside
+                return inside
+
+            def _set(x: int, y: int, r: int, g: int, b: int, a: int = 255) -> None:
+                if x < 0 or y < 0 or x >= w or y >= h:
+                    return
+                i = y * rowstride + x * 4
+                buf[i] = r
+                buf[i + 1] = g
+                buf[i + 2] = b
+                buf[i + 3] = a
+
+            for y in range(h):
+                for x in range(w):
+                    if _inside(x, y):
+                        _set(x, y, 255, 255, 255, 255)
+                    elif any(
+                        _inside(x + ox, y + oy)
+                        for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    ):
+                        _set(x, y, 15, 15, 15, 255)
+            gbytes = GLib.Bytes.new(bytes(buf))
+            stamp = GdkPixbuf.Pixbuf.new_from_bytes(
+                gbytes,
+                GdkPixbuf.Colorspace.RGB,
+                True,
+                8,
+                w,
+                h,
+                rowstride,
+            )
+            self._cursor_stamp = stamp
+            self._cursor_stamp_bytes = gbytes  # keep alive
+            return stamp
+        except Exception:
+            self._cursor_stamp = None
+            return None
 
     def _composite_local_cursor(self, pb: GdkPixbuf.Pixbuf) -> GdkPixbuf.Pixbuf:
-        """Bake a white arrow into a copy of the frame (always visible).
-
-        Does not depend on OS cursor themes or Gtk.Overlay positioning — the
-        pointer is pixels on the stream surface.
-        """
+        """Stamp cached arrow onto a copy of the frame (fast, always visible)."""
         if not self._wants_local_cursor():
             return pb
-        frac = self._cursor_frac
-        if frac is None:
-            frac = (0.5, 0.5)
+        stamp = self._ensure_cursor_stamp()
+        if stamp is None:
+            return pb
+        frac = self._cursor_frac or (0.5, 0.5)
         try:
             out = pb.copy()
         except Exception:
@@ -2413,61 +2454,37 @@ class RemoteDesktopViewer(Gtk.Window):
             return pb
         cx = int(max(0.0, min(1.0, frac[0])) * (w - 1))
         cy = int(max(0.0, min(1.0, frac[1])) * (h - 1))
-        # Arrow polygon in local coords (tip at 0,0)
-        poly = [
-            (0, 0),
-            (0, 16),
-            (4, 12),
-            (7, 19),
-            (9, 18),
-            (6, 11),
-            (12, 11),
-        ]
-        # Fill bounding box via scanline
-        min_x = min(p[0] for p in poly)
-        max_x = max(p[0] for p in poly)
-        min_y = min(p[1] for p in poly)
-        max_y = max(p[1] for p in poly)
-
-        def _inside(px: int, py: int) -> bool:
-            # Ray cast
-            inside = False
-            n = len(poly)
-            for i in range(n):
-                x1, y1 = poly[i]
-                x2, y2 = poly[(i + 1) % n]
-                if ((y1 > py) != (y2 > py)) and (
-                    px
-                    < (x2 - x1) * (py - y1) / max(1e-9, (y2 - y1)) + x1
-                ):
-                    inside = not inside
-            return inside
-
-        def _put(ix: int, iy: int, r: int, g: int, b: int) -> None:
-            if ix < 0 or iy < 0 or ix >= w or iy >= h:
-                return
-            try:
-                out.put_pixel(ix, iy, r, g, b)
-            except Exception:
-                pass
-
-        # Outline then fill (black outline, white body)
-        for dy in range(min_y - 1, max_y + 2):
-            for dx in range(min_x - 1, max_x + 2):
-                if _inside(dx, dy):
-                    _put(cx + dx, cy + dy, 255, 255, 255)
-                elif any(
-                    _inside(dx + ox, dy + oy)
-                    for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1))
-                ):
-                    _put(cx + dx, cy + dy, 10, 10, 10)
+        sw, sh = stamp.get_width(), stamp.get_height()
+        # Clip stamp to frame
+        dw = min(sw, w - cx)
+        dh = min(sh, h - cy)
+        if dw <= 0 or dh <= 0:
+            return out
+        try:
+            # dest_x, dest_y, dest_width, dest_height, offset_x, offset_y,
+            # scale_x, scale_y, interp, overall_alpha
+            stamp.composite(
+                out,
+                cx,
+                cy,
+                dw,
+                dh,
+                float(cx),
+                float(cy),
+                1.0,
+                1.0,
+                GdkPixbuf.InterpType.NEAREST,
+                255,
+            )
+        except Exception:
+            return pb
         return out
 
     def _render(self) -> None:
         pb = self._pixbuf
         if pb is None:
             return
-        # Frontend pointer: composite into frame pixels (bulletproof)
+        # Frontend pointer: composite into frame pixels (bulletproof + cheap)
         try:
             pb = self._composite_local_cursor(pb)
         except Exception:

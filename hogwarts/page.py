@@ -2336,12 +2336,16 @@ class HogwartsPage(Gtk.Box):
                 if profile in ("lan", "mjpeg", "ultra", "gaming_lan"):
                     profile = "gaming-lan"
                 try:
-                    fps = float(
-                        start_opts.get("fps")
-                        or (60 if profile in ("gaming", "gaming-lan") else 30)
-                    )
+                    if start_opts.get("fps") is not None:
+                        fps = float(start_opts.get("fps"))
+                    elif profile in ("gaming", "gaming-lan"):
+                        fps = 60.0
+                    elif profile == "quality":
+                        fps = 45.0
+                    else:
+                        fps = 45.0  # balanced — smooth UI animations
                 except (TypeError, ValueError):
-                    fps = 60.0 if profile in ("gaming", "gaming-lan") else 30.0
+                    fps = 60.0 if profile in ("gaming", "gaming-lan") else 45.0
                 if profile == "gaming-lan":
                     codec = "jpeg"
                 try:
@@ -2479,15 +2483,16 @@ class HogwartsPage(Gtk.Box):
                     return False
 
                 def on_frame(_data: bytes, _meta: dict) -> None:
-                    # Schedule at most one paint (~40fps cap); drop intermediates
+                    # Schedule at most one paint; drop intermediates (latest wins).
                     if getattr(self, "_ks_paint_src", None) is not None:
                         return
-                    # Gaming: paint next idle (0ms). Balanced: 6ms coalesce.
+                    # Prefer idle for all Session profiles so 45–60 fps UI
+                    # animations are not capped by a 6ms timer (~160→~60).
                     prof = str(getattr(self, "_ks_profile", "") or "").lower()
-                    if prof in ("gaming", "gaming-lan"):
+                    if prof in ("gaming", "gaming-lan", "balanced", "quality"):
                         self._ks_paint_src = GLib.idle_add(_ks_paint_tick)
                     else:
-                        self._ks_paint_src = GLib.timeout_add(6, _ks_paint_tick)
+                        self._ks_paint_src = GLib.timeout_add(4, _ks_paint_tick)
 
                 def on_status(msg: str, ok: bool | None) -> None:
                     def ui() -> bool:
