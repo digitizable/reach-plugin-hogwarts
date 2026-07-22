@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY agent/agent.py /app/agent.py
+COPY lab/entrypoint-agent.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+ENV PLANE_URL=http://plane:8080
+CMD ["/app/entrypoint.sh"]

@@ -42,12 +42,13 @@ Restart Reach after changes.
 | Panel | What |
 |-------|------|
 | **Channel** | Live path hero, SOCKS / hops / fingerprint / plane |
-| **Agents** | Fleet roster from `GET /api/v1/agents` |
-| **Listener** | Accept host/port, transport, cover face, ops notes |
+| **Agents** | Tasking + shell/FS; **Remote Viewer** window for screenshot / Live / Control |
+| **Agent (lab)** | Stable loop, spool, multi-URL; screenshot + optional x11vnc session |
+| **Listener** | CRUD + evidence LED + TCP probe + plane pull/push |
 | **Egress** | TCP matrix direct vs path SOCKS |
-| **Console** | Ops shell (status, plane, pull, notes) |
-| **Plane** | Control-plane URL + token + health |
-| **Ops kit** | Reverse export, playbook JSON, data dir |
+| **Console** | Ops shell; `pull` / auto-poll; `task …` |
+| **Plane** | Control-plane URL + token + poll interval + health + **Start plane** (local lab) |
+| **Ops kit** | Playbook fields, drills, **export agent zip** (runners + optional PyInstaller) |
 | **Session log** | Local activity trail |
 
 ## Control plane
@@ -58,19 +59,57 @@ Hogwarts does **not** host implants. Point **Plane** at your API — see [hogwar
 ~/.local/share/reach/plugin-data/com__digitizable__hogwarts/plane.json
 ```
 
+### Lab plane + agent (stdlib)
+
+```bash
+# terminal 1 — mock plane (T1–T4 + agent routes)
+PLANE_OPERATOR_TOKEN=dev PLANE_HTTP_ADDR=127.0.0.1:8080 python3 plane/server.py
+
+# mint enroll secret
+curl -s -X POST http://127.0.0.1:8080/api/v1/operator/enroll-secrets \
+  -H "Authorization: Bearer dev" -H "Content-Type: application/json" \
+  -d '{"max_uses":1}' 
+
+# terminal 2 — reference agent
+python3 agent/agent.py once -c agent.json   # after writing enroll_secret into agent.json
+```
+
+Hogwarts **Plane** panel: `http://127.0.0.1:8080` · token `dev` · then **Agents** → shell.
+
+### Personal lab (desk config + multi mock agents)
+
+```bash
+bash lab/personal_setup.sh
+```
+
+Writes Hogwarts `plane.json` (`http://127.0.0.1:8080` · token `dev`), starts three Docker agents, a **host** agent on this machine, and a **Win11 pack** under plugin-data `personal/win11-agent` (plane URL `http://192.168.122.1:8080` for libvirt NAT). Restart Reach after running.
+
+### Docker lab
+
+```bash
+cd lab && ./run_lab.sh
+# builds plane + agent images, enrolls, shells uname/id, leaves containers up
+# Plane for Hogwarts UI: http://127.0.0.1:8080  token=dev
+# Extra agents:
+#   docker run -d --network hogwarts-lab -e PLANE_URL=http://hogwarts-plane:8080 \
+#     -e PLANE_OPERATOR_TOKEN=dev hogwarts-agent:lab
+```
+
 ## Layout
 
 ```
 ui.py
-hogwarts/
-  page.py · banner.py · theme.py · net.py · store.py · widgets.py
-  backend/   # control-plane client + contract
-  panels/    # Channel · Agents · Listener · …
+hogwarts/          # Reach plugin UI
+  backend/         # operator client + CONTRACT
+  panels/
+plane/server.py    # lab control plane (not shipped in GTK)
+agent/agent.py     # reference agent
+lab/               # docker compose + smoke test
 ```
 
 ## Purple stance
 
-Operate the tasking loop **and** defend the keep. Research: [anguish.sh — Hogwarts / C2](https://anguish.sh/studies/hogwarts/notes).
+Operate the tasking loop **and** defend the keep. Whitepaper: [anguish.sh — Hogwarts](https://anguish.sh/studies/hogwarts). Working notes: [/studies/hogwarts/notes](https://anguish.sh/studies/hogwarts/notes).
 
 ## License
 

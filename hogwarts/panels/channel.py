@@ -116,25 +116,38 @@ class ChannelPanel(Gtk.Box):
         fp: str,
         plane: str,
     ) -> None:
-        self.state_lab.set_text(state_label)
-        self.path_lab.set_text(path)
-        self.fact_socks[1].set_text(socks)
-        self.fact_hops[1].set_text(hops)
-        self.fact_fp[1].set_text(fp if len(fp) < 120 else fp[:117] + "…")
-        self.fact_plane[1].set_text(plane)
+        fp_short = fp if len(fp) < 120 else fp[:117] + "…"
+        key = (state, state_label, path, socks, hops, fp_short, plane)
+        if key == getattr(self, "_path_status_fp", None):
+            return
+        self._path_status_fp = key
 
-        for cls in (
-            "hogwarts-dot-live",
-            "hogwarts-dot-idle",
-            "hogwarts-dot-busy",
-            "hogwarts-dot-off",
-        ):
-            self.dot.remove_css_class(cls)
-        self.dot.add_css_class(
-            {
-                "live": "hogwarts-dot-live",
-                "idle": "hogwarts-dot-idle",
-                "busy": "hogwarts-dot-busy",
-                "off": "hogwarts-dot-off",
-            }.get(state, "hogwarts-dot-idle")
-        )
+        if self.state_lab.get_text() != state_label:
+            self.state_lab.set_text(state_label)
+        if self.path_lab.get_text() != path:
+            self.path_lab.set_text(path)
+        if self.fact_socks[1].get_text() != socks:
+            self.fact_socks[1].set_text(socks)
+        if self.fact_hops[1].get_text() != hops:
+            self.fact_hops[1].set_text(hops)
+        if self.fact_fp[1].get_text() != fp_short:
+            self.fact_fp[1].set_text(fp_short)
+        if self.fact_plane[1].get_text() != plane:
+            self.fact_plane[1].set_text(plane)
+
+        want_dot = {
+            "live": "hogwarts-dot-live",
+            "idle": "hogwarts-dot-idle",
+            "busy": "hogwarts-dot-busy",
+            "off": "hogwarts-dot-off",
+        }.get(state, "hogwarts-dot-idle")
+        if getattr(self, "_dot_class", None) != want_dot:
+            for cls in (
+                "hogwarts-dot-live",
+                "hogwarts-dot-idle",
+                "hogwarts-dot-busy",
+                "hogwarts-dot-off",
+            ):
+                self.dot.remove_css_class(cls)
+            self.dot.add_css_class(want_dot)
+            self._dot_class = want_dot

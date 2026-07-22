@@ -21,10 +21,21 @@ _HELP = """Commands:
   time              Local + UTC time
   status            Path + plane summary
   plane             Show control-plane URL (no token)
-  pull              Fetch events from the API
-  agents            Refresh agent count
+  pull              Show new plane events here (opt-in; autopoll is quiet)
+  poll / autopoll   Background fleet/task refresh (does not spam console)
+  poll-stop         Stop background poll
+  agents            Refresh agent roster
   socks             Print live SOCKS URL
-  # anything else   Logged as an operator note
+  task <id|host> <type> [args…]
+                    Queue: ping shell note rekey fs_list fs_search fs_index_* download upload
+                    screenshot desktop_start socks_start socks_stop
+                    e.g. task lab-vm shell uname -a
+
+Files / Desktop tabs open File Explorer + Remote Viewer windows:
+  Agents → click agent → Files / Desktop tabs
+  Screenshot / Live / Control only inside the Remote Viewer window
+
+  # anything else   Logged as an operator note (+ timeline)
 """
 
 
@@ -88,7 +99,7 @@ class ConsolePanel(Gtk.Box):
         self.entry = Gtk.Entry()
         self.entry.add_css_class("hogwarts-console-input")
         self.entry.set_hexpand(True)
-        self.entry.set_placeholder_text("help · status · pull · agents…")
+        self.entry.set_placeholder_text("help · status · pull · clear · agents…")
         self.entry.connect("activate", self._on_activate)
         entry_row.append(self.entry)
         go = Gtk.Button(label="Run")
@@ -109,13 +120,27 @@ class ConsolePanel(Gtk.Box):
             buf.insert(end, "\n")
             end = buf.get_end_iter()
         buf.insert(end, text)
-        # keep last ~20k chars
-        if buf.get_char_count() > 20000:
+        # keep last ~12k chars (lighter than 20k — less layout thrash on poll events)
+        if buf.get_char_count() > 12000:
             start = buf.get_start_iter()
-            cut = buf.get_iter_at_offset(buf.get_char_count() - 16000)
+            cut = buf.get_iter_at_offset(buf.get_char_count() - 9000)
             buf.delete(start, cut)
-        mark = buf.create_mark(None, buf.get_end_iter(), False)
-        self.view.scroll_to_mark(mark, 0.0, False, 0.0, 1.0)
+        # Only auto-scroll if user is already near the bottom
+        try:
+            adj = self.view.get_parent()
+            # parent is ScrolledWindow
+            if hasattr(adj, "get_vadjustment"):
+                va = adj.get_vadjustment()
+                near_bottom = (va.get_upper() - va.get_value() - va.get_page_size()) < 80
+                if near_bottom:
+                    mark = buf.create_mark(None, buf.get_end_iter(), False)
+                    self.view.scroll_to_mark(mark, 0.0, False, 0.0, 1.0)
+            else:
+                mark = buf.create_mark(None, buf.get_end_iter(), False)
+                self.view.scroll_to_mark(mark, 0.0, False, 0.0, 1.0)
+        except Exception:
+            mark = buf.create_mark(None, buf.get_end_iter(), False)
+            self.view.scroll_to_mark(mark, 0.0, False, 0.0, 1.0)
 
     def _on_activate(self, *_a: Any) -> None:
         line = self.entry.get_text().strip()

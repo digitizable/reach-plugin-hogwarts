@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY plane/server.py /app/server.py
+ENV PLANE_HTTP_ADDR=0.0.0.0:8080
+ENV PLANE_DB=/data/plane.db
+EXPOSE 8080
+CMD ["python3", "/app/server.py"]

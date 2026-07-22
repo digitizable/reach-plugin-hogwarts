@@ -1,3 +1,21 @@
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Lab / agent runtime (never commit live enroll or operator material)
+*.db
+*.sqlite
+*.sqlite3
+agent.json
+**/agent.json
+plane.json
+**/plane.json
+*.local.json
+*.log
+.agent_spool/
+**/personal/

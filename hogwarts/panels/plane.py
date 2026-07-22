@@ -20,10 +20,12 @@ class PlanePanel(Gtk.Box):
         *,
         on_save: Callable,
         on_test: Callable,
+        on_start: Callable | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_hexpand(True)
         self.set_vexpand(True)
+        self._start_btn: Gtk.Button | None = None
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         body.add_css_class("hogwarts-panel")
@@ -31,7 +33,9 @@ class PlanePanel(Gtk.Box):
         intro = Gtk.Label(
             label=(
                 "Point Hogwarts at your C2 control plane. Only operator credentials "
-                "live here — never implant secrets. See hogwarts/backend/CONTRACT.md."
+                "live here — never implant secrets. See hogwarts/backend/CONTRACT.md.\n\n"
+                "Personal lab: use Start plane if Agents shows connection refused "
+                "(starts Docker hogwarts-plane or local plane/server.py)."
             ),
             wrap=True,
             xalign=0,
@@ -69,6 +73,16 @@ class PlanePanel(Gtk.Box):
         save.add_css_class("suggested-action")
         save.connect("clicked", lambda *_: on_save())
         row.append(save)
+        if on_start is not None:
+            start = Gtk.Button(label="Start plane")
+            start.add_css_class("suggested-action")
+            start.set_tooltip_text(
+                "Start local lab plane (docker start hogwarts-plane, "
+                "or python3 plane/server.py). Does not start remote production C2."
+            )
+            start.connect("clicked", lambda *_: on_start())
+            row.append(start)
+            self._start_btn = start
         test = Gtk.Button(label="Test health")
         test.add_css_class("flat")
         test.connect("clicked", lambda *_: on_test())
@@ -79,13 +93,21 @@ class PlanePanel(Gtk.Box):
         self.result.add_css_class("hogwarts-kv-val")
         body.append(self.result)
 
-        body.append(section_label("API surface"))
+        body.append(section_label("API surface (T4)"))
         api = Gtk.Label(
             label=(
-                "GET /api/v1/health\n"
-                "GET /api/v1/agents\n"
-                "GET /api/v1/events\n"
-                "POST /api/v1/agents/{id}/tasks  (future interact)"
+                "GET  /api/v1/health\n"
+                "GET  /api/v1/agents\n"
+                "POST /api/v1/agents/{id}/tasks   ping|shell|note|fs_list|fs_index_*|fs_search|download|upload|socks_*|rekey\n"
+                "GET  /api/v1/agents/{id}/tasks\n"
+                "GET  /api/v1/events\n"
+                "POST /api/v1/operator/enroll-secrets\n"
+                "POST /api/v1/agent/enroll|checkin|results\n"
+                "\n"
+                "Lab plane:  Start plane (UI) · docker start hogwarts-plane\n"
+                "            or: python3 plane/server.py\n"
+                "Lab agent:  python3 agent/agent.py -c agent.json\n"
+                "Full lab:   bash lab/personal_setup.sh"
             ),
             xalign=0,
         )
@@ -93,6 +115,10 @@ class PlanePanel(Gtk.Box):
         body.append(api)
 
         self.append(scroll_panel(body))
+
+    def set_start_sensitive(self, sensitive: bool) -> None:
+        if self._start_btn is not None:
+            self._start_btn.set_sensitive(sensitive)
 
     def read_config(self) -> PlaneConfig:
         try:

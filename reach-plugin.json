@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "com.digitizable.hogwarts",
   "name": "Hogwarts",
-  "version": "0.4.1",
-  "description": "C2 for Reach — Hogwarts keep: agents, channel, reverse listener, egress, control plane, console, playbooks. Purple desk: operate and defend the castle.",
+  "version": "0.5.44",
+  "description": "C2 for Reach \u2014 Hogwarts keep: agents, channel, reverse listener, egress, control plane, console, playbooks. Purple desk: operate and defend the castle.",
   "author": "digitizable",
   "homepage": "https://github.com/digitizable/reach-plugin-hogwarts",
   "license": "GPL-3.0-or-later",
@@ -17,7 +17,7 @@
   "nav": {
     "title": "Hogwarts",
     "icon": "network-wireless-symbolic",
-    "tooltip": "Hogwarts — C2 keep for Reach",
+    "tooltip": "Hogwarts \u2014 C2 keep for Reach",
     "icon_file": "hogwarts.png",
     "icon_symbolic": "rail.svg"
   },
