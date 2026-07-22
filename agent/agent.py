@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-VERSION = "0.5.35-lab"
+VERSION = "0.5.36-lab"
 # Keepstream VIDEO codec byte (matches research keepstream-v0)
 _KS_CODEC_JPEG = 1
 _KS_CODEC_H264 = 2
@@ -1838,9 +1838,14 @@ class _FfmpegH264Source:
                     str(crf),
                     "-profile:v",
                     "baseline",
-                    # Repeat SPS/PPS on keyframes so desk can join mid-stream
+                    # slices=1: multi-slice AUs were painted as green slabs on desk
+                    # (each slice emitted as its own incomplete picture).
+                    # repeat-headers: SPS/PPS on every keyframe for mid-stream join.
                     "-x264-params",
-                    f"repeat-headers=1:keyint={gop}:min-keyint={gop}",
+                    (
+                        f"repeat-headers=1:keyint={gop}:min-keyint={gop}:"
+                        "scenecut=0:slices=1:sliced-threads=0:aud=1"
+                    ),
                 ],
             ),
             (
@@ -1855,6 +1860,11 @@ class _FfmpegH264Source:
                     "vbr",
                     "-cq",
                     str(max(19, crf - 2)),
+                    "-g",
+                    str(gop),
+                    # Prefer a single slice when the driver allows it
+                    "-surfaces",
+                    "4",
                     "-bsf:v",
                     "dump_extra=freq=keyframe",
                 ],
@@ -1870,6 +1880,8 @@ class _FfmpegH264Source:
                     "cbr",
                     "-b:v",
                     "4M",
+                    "-g",
+                    str(gop),
                     "-bsf:v",
                     "dump_extra=freq=keyframe",
                 ],
@@ -1973,16 +1985,35 @@ class _FfmpegH264Source:
             return 0
         return nal[i] & 0x1F
 
+    @staticmethod
+    def _nal_header_len(nal: bytes) -> int:
+        if len(nal) >= 4 and nal[0:4] == b"\x00\x00\x00\x01":
+            return 4
+        if len(nal) >= 3 and nal[0:3] == b"\x00\x00\x01":
+            return 3
+        return 0
+
+    @classmethod
+    def _first_mb_in_slice_zero(cls, nal: bytes) -> bool:
+        """True if slice_header.first_mb_in_slice == 0 (starts a new picture).
+
+        For multi-slice frames, only the first VCL NAL has first_mb=0; later
+        slices must stay in the same access unit or the desk paints green slabs.
+        """
+        sc = cls._nal_header_len(nal)
+        # NAL header is 1 byte for AVC (forbidden_zero + nal_ref_idc + type)
+        if sc <= 0 or sc + 1 >= len(nal):
+            return True  # assume new picture if unparseable
+        # Exp-Golomb ue(v): a leading 1-bit means codeNum 0 → first_mb == 0
+        return (nal[sc + 1] & 0x80) != 0
+
     def _remember_param_sets(self, nal: bytes) -> None:
         """Track latest SPS (7) / PPS (8) so keyframe AUs stay self-contained."""
         nt = self._nal_type(nal)
         if nt not in (7, 8):
             return
-        # Rebuild param blob from pending non-VCL + this style: keep rolling SPS+PPS
-        # Extract existing types from _param_sets and replace matching type.
         parts: list[bytes] = []
         if self._param_sets:
-            # split prior blob into NALs
             pos = self._start_code_positions(self._param_sets)
             for i, start in enumerate(pos):
                 end = pos[i + 1] if i + 1 < len(pos) else len(self._param_sets)
@@ -2002,15 +2033,15 @@ class _FfmpegH264Source:
         is_key = 5 in types
         au = b"".join(nals)
         if is_key and self._param_sets and 7 not in types:
-            # Desk may join mid-GOP; prepend last SPS/PPS on IDR
             au = self._param_sets + au
         return au, is_key
 
     def read_au(self, timeout_s: float = 0.5) -> tuple[bytes, bool] | None:
         """Return (annex_b_access_unit, is_keyframe) or None.
 
-        Access unit model (single-slice zerolatency):
-        non-VCL (SPS/PPS/SEI) accumulate, then one VCL slice completes the AU.
+        Access unit boundary = next VCL with first_mb_in_slice==0 (or AUD), so
+        multi-slice pictures stay together. Emitting each slice as its own AU
+        produced green rectangular slabs on the desk after GStreamer decode.
         """
         proc = self._proc
         if proc is None or proc.stdout is None or proc.poll() is not None:
@@ -2028,25 +2059,31 @@ class _FfmpegH264Source:
                 is_vcl = nt in (1, 5)
                 if nt in (7, 8):
                     self._remember_param_sets(nal)
-                if is_vcl:
-                    # Complete previous AU if it already had a VCL (shouldn't with
-                    # single-slice model), else attach leading non-VCL + this VCL.
+                if nt == 9:
+                    # Access unit delimiter — flush previous picture
                     if self._have_vcl and self._pending:
+                        emitted = self._emit_au(self._pending)
+                        self._pending = [nal]
+                        self._have_vcl = False
+                        if emitted is not None:
+                            return emitted
+                    self._pending.append(nal)
+                    continue
+                if is_vcl:
+                    new_pic = self._first_mb_in_slice_zero(nal)
+                    if new_pic and self._have_vcl and self._pending:
+                        # Start of next picture — emit the completed AU
                         emitted = self._emit_au(self._pending)
                         self._pending = [nal]
                         self._have_vcl = True
                         if emitted is not None:
                             return emitted
                     else:
+                        # Continuation slice or first VCL of a new AU
                         self._pending.append(nal)
                         self._have_vcl = True
-                        emitted = self._emit_au(self._pending)
-                        self._pending.clear()
-                        self._have_vcl = False
-                        if emitted is not None:
-                            return emitted
                 else:
-                    # Leading parameter sets / SEI for the next slice
+                    # SPS/PPS/SEI — attach to next picture
                     self._pending.append(nal)
                 continue
             try:
