@@ -1046,16 +1046,16 @@ class RemoteDesktopViewer(Gtk.Window):
             self._mode_session.set_active(True)
         else:
             self._set_mode("session")
-        # Local cursor (instant). Agent Keepstream capture uses draw_mouse=0.
+        # Hide local cursor — agent Keepstream bakes Windows cursor into frames.
         try:
-            self.picture.set_cursor_from_name("default")
+            self.picture.set_cursor_from_name("none")
         except Exception:
             pass
         # Stop task-poll Live — Keepstream owns frames now
         if self.btn_live.get_active() and self._on_live:
             self.btn_live.set_active(False)
         self._set_status(
-            "Keepstream Session — local cursor · stream + input over TCP",
+            "Keepstream Session — remote cursor in stream · local pointer hidden",
             ok=True,
         )
 
@@ -1111,22 +1111,22 @@ class RemoteDesktopViewer(Gtk.Window):
             self._main_stack.set_visible_child_name("view")
             if mode == "session" and ks_up:
                 self.mode_hint.set_text(
-                    "Session (Keepstream): local cursor (instant) · "
-                    "click/drag injects over TCP · video has no remote pointer"
+                    "Session (Keepstream): Windows cursor in-frame · "
+                    "local pointer hidden · click/drag injects over TCP"
                 )
-                # Local OS cursor — remote pointer is NOT baked into frames
-                # (encode/decode lag made composited cursor feel delayed).
+                # Hide local cursor so only the remote (in-stream) pointer shows.
                 try:
-                    self.picture.set_cursor_from_name("default")
+                    self.picture.set_cursor_from_name("none")
                 except Exception:
                     pass
             elif mode == "control":
                 if ks_up:
                     self.mode_hint.set_text(
-                        "Control + Keepstream: local cursor · input over TCP stream"
+                        "Control + Keepstream: remote cursor in-frame · "
+                        "local pointer hidden · input over TCP"
                     )
                     try:
-                        self.picture.set_cursor_from_name("default")
+                        self.picture.set_cursor_from_name("none")
                     except Exception:
                         pass
                 else:
@@ -1139,7 +1139,7 @@ class RemoteDesktopViewer(Gtk.Window):
                     if not self.btn_live.get_active() and self._on_live:
                         self.btn_live.set_active(True)
                     try:
-                        # Live-poll frames still composite remote cursor
+                        # Live-poll frames composite remote cursor
                         self.picture.set_cursor_from_name("none")
                     except Exception:
                         self.picture.set_cursor_from_name("default")

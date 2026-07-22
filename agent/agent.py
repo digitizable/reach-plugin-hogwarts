@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-VERSION = "0.5.38-lab"
+VERSION = "0.5.39-lab"
 # Keepstream VIDEO codec byte (matches research keepstream-v0)
 _KS_CODEC_JPEG = 1
 _KS_CODEC_H264 = 2
@@ -1566,9 +1566,8 @@ class _FfmpegMjpegSource:
         qv = _ffmpeg_mjpeg_qv(self.quality)
         fps_i = max(5, min(60, int(round(self.fps))))
 
-        # draw_mouse=0: cursor is NOT baked into Keepstream frames.
-        # Desk shows a local OS cursor so pointer motion stays instant; a
-        # composited remote cursor always lags by encode+decode RTT.
+        # draw_mouse=1: bake host cursor into Keepstream frames so the desk
+        # can hide its local cursor and show only the remote (Windows) pointer.
         if os.name == "nt":
             # gdigrab desktop (Windows Keepstream path — needs ffmpeg on PATH)
             cmd = [
@@ -1581,7 +1580,7 @@ class _FfmpegMjpegSource:
                 "-framerate",
                 str(fps_i),
                 "-draw_mouse",
-                "0",
+                "1",
                 "-i",
                 "desktop",
                 "-vf",
@@ -1608,7 +1607,7 @@ class _FfmpegMjpegSource:
                 "-video_size",
                 f"{sw}x{sh}",
                 "-draw_mouse",
-                "0",
+                "1",
                 "-i",
                 display,
                 "-vf",
@@ -1909,9 +1908,9 @@ class _FfmpegH264Source:
             ),
         ]
 
-        # Prefer no mouse in the bitstream (desk local cursor). Retry with
-        # draw_mouse only if grab rejects the flag (legacy ffmpeg).
-        draw_variants = [False, True] if os.name == "nt" else [False]
+        # Prefer host cursor in the bitstream (desk hides local cursor).
+        # Retry without draw_mouse if legacy ffmpeg rejects the flag.
+        draw_variants = [True, False] if os.name == "nt" else [True]
         errors: list[str] = []
         creationflags = 0
         if os.name == "nt":
