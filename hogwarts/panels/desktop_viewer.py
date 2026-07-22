@@ -1046,14 +1046,18 @@ class RemoteDesktopViewer(Gtk.Window):
             self._mode_session.set_active(True)
         else:
             self._set_mode("session")
+        # Local cursor (instant). Agent Keepstream capture uses draw_mouse=0.
         try:
-            self.picture.set_cursor_from_name("none")
+            self.picture.set_cursor_from_name("default")
         except Exception:
             pass
         # Stop task-poll Live — Keepstream owns frames now
         if self.btn_live.get_active() and self._on_live:
             self.btn_live.set_active(False)
-        self._set_status("Keepstream Session attached — stream + input over TCP", ok=True)
+        self._set_status(
+            "Keepstream Session — local cursor · stream + input over TCP",
+            ok=True,
+        )
 
     def _accepts_remote_input(self) -> bool:
         """Control mode, or Session mode while Keepstream is connected."""
@@ -1107,27 +1111,38 @@ class RemoteDesktopViewer(Gtk.Window):
             self._main_stack.set_visible_child_name("view")
             if mode == "session" and ks_up:
                 self.mode_hint.set_text(
-                    "Session (Keepstream): continuous stream · click/drag injects over TCP"
+                    "Session (Keepstream): local cursor (instant) · "
+                    "click/drag injects over TCP · video has no remote pointer"
                 )
+                # Local OS cursor — remote pointer is NOT baked into frames
+                # (encode/decode lag made composited cursor feel delayed).
                 try:
-                    self.picture.set_cursor_from_name("none")
+                    self.picture.set_cursor_from_name("default")
                 except Exception:
                     pass
             elif mode == "control":
-                self.mode_hint.set_text(
-                    "Control: host cursor in-frame · input prioritized · "
-                    "Live ~300ms @ lighter res (or use Session for true stream)"
-                )
-                # Snappier Live while controlling (lighter frames + faster poll)
-                # Skip task Live if Keepstream already streaming
-                if not ks_up:
+                if ks_up:
+                    self.mode_hint.set_text(
+                        "Control + Keepstream: local cursor · input over TCP stream"
+                    )
+                    try:
+                        self.picture.set_cursor_from_name("default")
+                    except Exception:
+                        pass
+                else:
+                    self.mode_hint.set_text(
+                        "Control: host cursor in-frame · input prioritized · "
+                        "Live ~300ms @ lighter res (or use Session for true stream)"
+                    )
+                    # Snappier Live while controlling (lighter frames + faster poll)
                     self._set_live_interval(0.3)
                     if not self.btn_live.get_active() and self._on_live:
                         self.btn_live.set_active(True)
-                try:
-                    self.picture.set_cursor_from_name("none")
-                except Exception:
-                    self.picture.set_cursor_from_name("default")
+                    try:
+                        # Live-poll frames still composite remote cursor
+                        self.picture.set_cursor_from_name("none")
+                    except Exception:
+                        self.picture.set_cursor_from_name("default")
             else:
                 self.mode_hint.set_text(
                     "View: Capture / Live / archive — host cursor composited into frames"
@@ -1173,8 +1188,12 @@ class RemoteDesktopViewer(Gtk.Window):
         if len(self._input_queue) > 40:
             self._input_queue = self._input_queue[-40:]
         if self._input_flush_src is None:
-            # 12ms batch — coalesce moves, still feel immediate on clicks
-            self._input_flush_src = GLib.timeout_add(12, self._flush_input_timer)
+            ks = self._keepstream
+            ks_up = bool(ks is not None and getattr(ks, "connected", False))
+            # Keepstream INPUT is cheap (no plane RTT) — flush ASAP so remote
+            # UI tracks the local cursor tightly.
+            delay_ms = 4 if ks_up else 12
+            self._input_flush_src = GLib.timeout_add(delay_ms, self._flush_input_timer)
 
     def _flush_input_timer(self) -> bool:
         self._input_flush_src = None

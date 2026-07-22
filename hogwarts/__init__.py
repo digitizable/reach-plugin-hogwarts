@@ -1,3 +1,3 @@
 """Hogwarts — purple C2 desk for Reach."""
 
-__version__ = "0.5.65"
+__version__ = "0.5.66"

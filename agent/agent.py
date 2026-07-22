@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-VERSION = "0.5.36-lab"
+VERSION = "0.5.37-lab"
 # Keepstream VIDEO codec byte (matches research keepstream-v0)
 _KS_CODEC_JPEG = 1
 _KS_CODEC_H264 = 2
@@ -1566,9 +1566,11 @@ class _FfmpegMjpegSource:
         qv = _ffmpeg_mjpeg_qv(self.quality)
         fps_i = max(5, min(60, int(round(self.fps))))
 
+        # draw_mouse=0: cursor is NOT baked into Keepstream frames.
+        # Desk shows a local OS cursor so pointer motion stays instant; a
+        # composited remote cursor always lags by encode+decode RTT.
         if os.name == "nt":
-            # gdigrab desktop (Windows Keepstream 60fps path — needs ffmpeg on PATH)
-            # draw_mouse=1 when supported; ignore if older ffmpeg rejects it
+            # gdigrab desktop (Windows Keepstream path — needs ffmpeg on PATH)
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -1579,7 +1581,7 @@ class _FfmpegMjpegSource:
                 "-framerate",
                 str(fps_i),
                 "-draw_mouse",
-                "1",
+                "0",
                 "-i",
                 "desktop",
                 "-vf",
@@ -1606,7 +1608,7 @@ class _FfmpegMjpegSource:
                 "-video_size",
                 f"{sw}x{sh}",
                 "-draw_mouse",
-                "1",
+                "0",
                 "-i",
                 display,
                 "-vf",
@@ -1636,9 +1638,9 @@ class _FfmpegMjpegSource:
 
         if not _spawn(cmd):
             return False
-        # Older Windows ffmpeg may reject -draw_mouse — retry without
         time.sleep(0.15)
-        if self._proc is not None and self._proc.poll() is not None and os.name == "nt":
+        # Older ffmpeg may reject -draw_mouse entirely — retry without the flag
+        if self._proc is not None and self._proc.poll() is not None:
             try:
                 self._proc.kill()
             except Exception:
@@ -1888,7 +1890,9 @@ class _FfmpegH264Source:
             ),
         ]
 
-        draw_variants = [True, False] if os.name == "nt" else [True]
+        # Prefer no mouse in the bitstream (desk local cursor). Retry with
+        # draw_mouse only if grab rejects the flag (legacy ffmpeg).
+        draw_variants = [False, True] if os.name == "nt" else [False]
         errors: list[str] = []
         creationflags = 0
         if os.name == "nt":
