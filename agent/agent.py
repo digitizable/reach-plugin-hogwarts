@@ -1789,8 +1789,11 @@ def _ultra_host_start(payload: dict[str, Any], *, agent_id: str) -> dict[str, An
         + (f" udp={udp_port}" if udp_port else "")
         + f" profile={bits.get('profile') or profile} · READY ok"
     )
-    if "stub" in capture or capture == "stub-not-implemented":
-        note += " · STUB (no media yet — plumbing only)"
+    if capture in ("none", "stub-not-implemented") or "stub" in capture:
+        note += " · no media yet"
+        ks_ver = "ultra-host"
+    else:
+        ks_ver = "ultra-host"
 
     return {
         "started": True,
@@ -1810,13 +1813,13 @@ def _ultra_host_start(payload: dict[str, Any], *, agent_id: str) -> dict[str, An
         "quality": quality,
         "capture": capture,
         "agent_version": VERSION,
-        "keepstream_version": "ultra-host-stub",
+        "keepstream_version": ks_ver,
         "transport": bits.get("transport") or transport,
         "udp_port": udp_port,
         "local_cursor": True,
         "draw_mouse": False,
         "note": note,
-        "prewarm": False,
+        "prewarm": capture not in ("none", "stub-not-implemented"),
         "agent_id": agent_id,
     }
 
