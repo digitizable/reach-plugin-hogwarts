@@ -2350,13 +2350,44 @@ class HogwartsPage(Gtk.Box):
                         codec = "jpeg"
                 if codec not in ("jpeg", "h264", "auto"):
                     codec = "jpeg"
-                profile = "default"
+                # Keepstream Ultra: pass through UI profile (lan60|path). Do NOT
+                # force "default" — that mapped server-side to path and skipped
+                # lan60 capture pins (see notes/keepstream-ultra desk-fix-profile).
+                profile = str(
+                    start_opts.get("profile")
+                    or getattr(self, "_ks_profile", None)
+                    or "path"
+                ).strip().lower()
+                if profile in (
+                    "lan",
+                    "lan60",
+                    "lan-60",
+                    "gaming",
+                    "gaming-lan",
+                    "gaming_lan",
+                    "ultra",
+                    "lowlat",
+                ):
+                    profile = "lan60"
+                elif profile in ("path", "balanced", "default", "c2", "socks", ""):
+                    profile = "path"
+                else:
+                    profile = "path"
+                # Profile-aware defaults when viewer omitted knobs
+                if profile == "lan60":
+                    def_fps, def_q, def_tr = 60.0, 80, "udp"
+                else:
+                    def_fps, def_q, def_tr = 45.0, 72, "tcp"
                 try:
-                    fps = float(start_opts.get("fps") or 60)
+                    fps = float(
+                        start_opts["fps"]
+                        if start_opts.get("fps") is not None
+                        else def_fps
+                    )
                 except (TypeError, ValueError):
-                    fps = 60.0
+                    fps = def_fps
                 fps = max(30.0, min(fps, 60.0))
-                # Default stream: MJPEG pure UDP (best feel)
+                # Default stream: MJPEG; codec from options or jpeg for LAN feel
                 if start_opts.get("codec"):
                     c2 = str(start_opts.get("codec") or "").strip().lower()
                     if c2 in ("jpeg", "h264", "auto"):
@@ -2366,9 +2397,18 @@ class HogwartsPage(Gtk.Box):
                 else:
                     codec = "jpeg"
                 try:
-                    quality = int(start_opts.get("quality") or 86)
+                    quality = int(
+                        start_opts["quality"]
+                        if start_opts.get("quality") is not None
+                        else def_q
+                    )
                 except (TypeError, ValueError):
-                    quality = 86
+                    quality = def_q
+                # lan60 capture pins use quality<=82 — clamp default path only
+                if profile == "lan60":
+                    quality = max(50, min(quality, 82))
+                else:
+                    quality = max(50, min(quality, 95))
                 payload: dict = {
                     "mode": "keepstream",
                     "face": face if face != "path" else "loopback",
@@ -2378,9 +2418,9 @@ class HogwartsPage(Gtk.Box):
                     "codec": codec,
                     "profile": profile,
                     "fps": max(30.0, min(fps, 60.0)),
-                    "quality": max(50, min(quality, 95)),
+                    "quality": quality,
                 }
-                # Parsec-class local cursor (gaming profiles default True server-side)
+                # Local cursor (desk paints pointer)
                 if "local_cursor" in start_opts:
                     payload["local_cursor"] = bool(start_opts.get("local_cursor"))
                 else:
@@ -2393,8 +2433,10 @@ class HogwartsPage(Gtk.Box):
                     tr = str(start_opts.get("transport") or "").strip().lower()
                     if tr in ("tcp", "udp"):
                         payload["transport"] = tr
+                    else:
+                        payload["transport"] = def_tr
                 else:
-                    payload["transport"] = "udp"
+                    payload["transport"] = def_tr
                 ip = start_opts.get("input_provider")
                 if isinstance(ip, dict) and (
                     ip.get("command") or ip.get("pipe") or ip.get("kind")
