@@ -2654,10 +2654,26 @@ class HogwartsPage(Gtk.Box):
                 via = "path SOCKS" if socks_h else "direct"
                 capture = str(res.get("capture") or "").strip() or "?"
                 agent_ver = str(res.get("agent_version") or "").strip()
+                ks_ver = str(res.get("keepstream_version") or "").strip()
+                prof = str(res.get("profile") or profile or "").strip()
+                transport = str(res.get("transport") or "").strip()
+                udp_p = res.get("udp_port") or 0
+                # Keepstream Ultra honesty: version + profile + transport on chip
                 note = (
                     f"Keepstream {host}:{port} · {via} · {sid} · "
                     f"codec={res.get('codec')} · capture={capture}"
                 )
+                if prof:
+                    note += f" · profile={prof}"
+                if transport:
+                    note += f" · {transport}"
+                    try:
+                        if int(udp_p or 0) > 0:
+                            note += f":{int(udp_p)}"
+                    except (TypeError, ValueError):
+                        pass
+                if ks_ver:
+                    note += f" · ks {ks_ver}"
                 if agent_ver:
                     note += f" · agent {agent_ver}"
                 self._agents.set_desktop_note(note, ok=True)
@@ -2666,6 +2682,8 @@ class HogwartsPage(Gtk.Box):
                 info["capture"] = capture
                 if agent_ver:
                     info["agent_version"] = agent_ver
+                if ks_ver:
+                    info["keepstream_version"] = ks_ver
                 if socks_h:
                     info["socks"] = f"{socks_h}:{socks_p}"
                 self._agents.set_desktop_session_info(info)
